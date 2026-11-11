@@ -16,6 +16,7 @@ import {
 
 const MOD = "previews";
 const POLL_TICKS = 3; // the timer ticks every second; a poll is every third
+const AWAY = { right: "left", left: "right", top: "down", bottom: "up" }; // pane.go away from a drawer edge
 const CONFIRM_MS = 3000; // second press of x within this deletes
 const RAIL_W = 36;
 const LIST_W = 280;
@@ -45,7 +46,7 @@ export default class Previews extends View {
     this.items = [];
     this.notes = {};
     this.notesRaw = null;
-    this.rel = new Map(); // path -> { rel, mtime, retry? } copied under appHome
+    this.rel = new Map(); // path -> { rel, mtime, retry?, error? } copied under appHome
     this.dims = new Map(); // rel -> { w, h }
     this.queue = []; // notes edits waiting to be written
     this.flushing = false;
@@ -235,7 +236,7 @@ export default class Previews extends View {
               cx.notify();
             }
           } catch (e) {
-            this.rel.set(item.path, { rel: null, mtime: item.mtime, retry: Date.now() + 30000 });
+            this.rel.set(item.path, { rel: null, mtime: item.mtime, retry: Date.now() + 30000, error: message(e) });
             this.error = message(e);
             cx.notify();
           }
@@ -340,7 +341,8 @@ export default class Previews extends View {
     return list.find((a) => a.focused) ?? list[0] ?? null;
   }
 
-  send(cx, blocks, done) {
+  // `onSent` runs only once the agent has received the message.
+  send(cx, blocks, done, onSent) {
     const text = feedbackText(blocks);
     if (!text) {
       notify({ title: "Nothing to send", body: "Drop a pin on the image first.", level: "warning" });
@@ -354,6 +356,7 @@ export default class Previews extends View {
     cx.spawn(async (cx) => {
       try {
         await sendToAgent(agent.address, text);
+        onSent?.(cx);
         notify({ title: done, level: "success" });
       } catch (e) {
         notify({ title: "Could not send feedback", body: message(e), level: "error" });
@@ -372,10 +375,12 @@ export default class Previews extends View {
     if (!list.length) return;
     this.commitNote(cx);
     const blocks = list.map((i) => ({ path: i.path, pins: this.pinsOf(i.path), approve: true }));
-    this.update(cx, (n) => {
-      for (const i of list) entryOf(n, i.path).status = "approved";
-    });
-    this.send(cx, blocks, list.length > 1 ? `Approved ${list.length} drafts` : `Approved ${list[0].name}`);
+    // Marked approved only after the agent has heard it; on failure the status stays.
+    this.send(cx, blocks, list.length > 1 ? `Approved ${list.length} drafts` : `Approved ${list[0].name}`, (cx) =>
+      this.update(cx, (n) => {
+        for (const i of list) entryOf(n, i.path).status = "approved";
+      }),
+    );
   }
 
   // Two presses of x within three seconds; `after` runs once the file is gone.
@@ -429,7 +434,11 @@ export default class Previews extends View {
     const i = flat.findIndex((x) => x.path === this.sel);
     const next = flat[(((i < 0 ? 0 : i + delta) % flat.length) + flat.length) % flat.length];
     this.sel = next.path;
-    const row = this.rows().findIndex((r) => r.item?.path === next.path);
+    // Horizontal placement renders cards only, so index over what the container holds.
+    const vertical = placement()?.vertical ?? true;
+    const row = this.rows()
+      .filter((r) => vertical || r.item)
+      .findIndex((r) => r.item?.path === next.path);
     if (row >= 0) this.scroll.scroll_to_item(row);
     cx.notify();
   }
@@ -475,7 +484,7 @@ export default class Previews extends View {
         break;
       case "escape":
         this.wantOpen = false;
-        run("pane.go", { direction: "left" });
+        run("pane.go", { direction: AWAY[placement()?.edge] ?? "left" }); // away from the drawer's edge
         cx.notify();
         break;
       default:
@@ -753,7 +762,8 @@ export default class Previews extends View {
     }
     if (!rel) {
       return div().w(w).h(h).flex().items_center().justify_center().text_size(12).text_color(t.dim)
-        .child(this.error && !this.rel.has(item.path) ? "…" : "Loading image…");
+        .px(12)
+        .child(this.rel.get(item.path)?.error ?? "Loading image…");
     }
     const pins = annotate ? this.pinsOf(item.path) : [];
     return div()

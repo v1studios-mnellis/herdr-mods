@@ -121,7 +121,8 @@ export async function cachedImage(item, machine) {
     );
     if (r.code !== 0) throw new Error(r.stderr.trim() || `copy from ${machine} failed`);
   } else {
-    await fs.copyFile(item.path, dest);
+    await fs.copyFile(item.path, `${dest}.tmp`);
+    await fs.rename(`${dest}.tmp`, dest);
   }
   try {
     for (const old of await fs.readdir(dir)) {

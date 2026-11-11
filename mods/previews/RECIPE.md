@@ -9,6 +9,8 @@ back to the space's agent with one key. A new image raises a toast and a sound.
 
 ![Previews](preview.png)
 
+<!-- preview.png: screenshot is added by the orchestrator after install. -->
+
 ## What you see
 
 **The rail.** A floating block docked on the right edge. Until the pointer is on
@@ -179,6 +181,8 @@ file and written, so the drawer and the window don't overwrite each other.
   silently draws nothing, which is why every image is cached first.
 - A local file younger than 1.5 s is not copied yet (it may still be written); the
   next 3 s poll picks it up.
+- Discovery runs GNU `find -printf`, so the mod assumes Linux (GNU findutils) on the
+  local machine and on any remote one; on macOS/BSD the poll finds nothing.
 - Module top level has no side effects (herdr reloads the module on every save).
   No `setTimeout`; no `cx` is kept across callbacks. Text areas are made in `init`,
   never in `render`.

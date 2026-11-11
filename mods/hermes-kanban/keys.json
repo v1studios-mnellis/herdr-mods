@@ -1,0 +1,14 @@
+{
+  "global": {
+    "ctrl-alt-b": {
+      "command": "pane.split",
+      "args": { "direction": "right", "mod": "hermes-kanban" }
+    }
+  },
+  "mod:hermes-kanban": {
+    "r": "hermes-kanban.refresh",
+    "n": "hermes-kanban.new",
+    "d": "hermes-kanban.toggle:done",
+    "a": "hermes-kanban.toggle:archived"
+  }
+}

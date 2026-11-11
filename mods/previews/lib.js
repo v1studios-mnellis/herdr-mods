@@ -90,15 +90,6 @@ function hashOf(s) {
   return a.toString(16).padStart(8, "0") + b.toString(16).padStart(8, "0");
 }
 
-async function exists(path) {
-  try {
-    await fs.stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 // image() only reads below appHome(), so every shown image is copied to
 // mods/previews/.cache/<hash>-<mtime ms>.<ext> (a new mtime is a new name, so a
 // redrawn draft is never served from an old decode). Resolves with the path
@@ -110,7 +101,12 @@ export async function cachedImage(item, machine) {
   const rel = `${CACHE}/${file}`;
   const dir = `${appHome()}/${CACHE}`;
   const dest = `${dir}/${file}`;
-  if (await exists(dest)) return rel;
+  // The sandbox fs has no stat, so list the dir once for the exists check and the cleanup.
+  let cached = [];
+  try {
+    cached = await fs.readdir(dir);
+  } catch {} // no cache dir yet
+  if (cached.includes(file)) return rel;
   if (!machine && Date.now() / 1000 - item.mtime < 1.5) return null; // still being written
   await fs.mkdir(dir, { recursive: true });
   if (machine) {
@@ -121,11 +117,13 @@ export async function cachedImage(item, machine) {
     );
     if (r.code !== 0) throw new Error(r.stderr.trim() || `copy from ${machine} failed`);
   } else {
-    await fs.copyFile(item.path, `${dest}.tmp`);
-    await fs.rename(`${dest}.tmp`, dest);
+    // The mod sandbox's fs/promises has only mkdir/readdir/unlink/readFile/writeFile
+    // (no stat/copyFile/rename/cp), so don't reintroduce those.
+    const bytes = await fs.readFile(item.path);
+    await fs.writeFile(dest, bytes);
   }
   try {
-    for (const old of await fs.readdir(dir)) {
+    for (const old of cached) {
       if (old.startsWith(`${id}-`) && old !== file) await fs.unlink(`${dir}/${old}`);
     }
   } catch {}

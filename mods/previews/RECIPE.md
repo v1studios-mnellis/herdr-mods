@@ -162,7 +162,7 @@ file and written, so the drawer and the window don't overwrite each other.
   `address` is the core address, `t4` or `anton/t3`).
 - Images: `image(path)` reads only below `~/.config/herdr-app`, so every shown
   image is copied to `mods/previews/.cache/<hash>-<mtime ms>.<ext>` (hidden folder,
-  so saving there never reloads the mod; `.gitignore`d). Local: `fs.copyFile`.
+  so saving there never reloads the mod; `.gitignore`d). Local: `fs.readFile` + `fs.writeFile`.
   Remote: `exec("sh", ["-c", 'ssh "$1" base64 -- "$2" > "$3.b64" && base64 -d
   "$3.b64" > "$3.tmp" && mv "$3.tmp" "$3"; …', "sh", machine, remotePath, dest])`
   (the machine's name is an ssh alias). A changed mtime is a new name; the older
@@ -188,6 +188,9 @@ file and written, so the drawer and the window don't overwrite each other.
   next 3 s poll picks it up.
 - Discovery runs GNU `find -printf`, so the mod assumes Linux (GNU findutils) on the
   local machine and on any remote one; on macOS/BSD the poll finds nothing.
+- The mod sandbox's `fs/promises` exposes only `mkdir`/`readdir`/`unlink`/`readFile`/
+  `writeFile` (no `stat`/`copyFile`/`rename`/`cp`); copies are `readFile` + `writeFile`,
+  and "exists" is a `readdir` check.
 - Module top level has no side effects (herdr reloads the module on every save).
   No `setTimeout`; no `cx` is kept across callbacks. Text areas are made in `init`,
   never in `render`.

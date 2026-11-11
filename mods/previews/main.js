@@ -27,6 +27,9 @@ const THUMB_W = 64;
 const THUMB_H = 48;
 const PANEL_W = 250; // pop-out: pins and notes
 const PAD = 12;
+const ZOOM_MIN = 0.25;
+const ZOOM_MAX = 8;
+const ZOOM_STEP = 1.25; // a zoom key
 const SVG_THROTTLE_MS = 30; // live stroke: at most this often the overlay SVG is rewritten and the window repainted
 const TOOLS = [
   { id: "pin", name: "pin", keys: ["1", "p"] },
@@ -69,6 +72,7 @@ export default class Previews extends View {
     this.svgAt = 0;
     this.framePx = null; // { w, h }: the annotated frame's rendered size in px
     this.tool = "pin";
+    this.zoom = 1; // pop-out: multiplier on the fit-to-stage size
     this.live = null; // { path, stroke }: the stroke being drawn
 
     if (this.overlay) {
@@ -354,6 +358,11 @@ export default class Previews extends View {
   setTool(cx, tool) {
     this.finishStroke(cx);
     this.tool = tool;
+    cx.notify();
+  }
+
+  setZoom(cx, z) {
+    this.zoom = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z));
     cx.notify();
   }
 
@@ -762,7 +771,7 @@ export default class Previews extends View {
     const footer = div().h(22).flex_none().px(10).flex().items_center().text_size(10).text_color(hint.color).truncate().child(hint.text);
 
     const empty = div().p(14).text_size(11).text_color(t.dim)
-      .child(this.bind?.folder ? "No previews yet. Agents save images to .herdr-previews/ in this space's folder." : "This space has no folder.");
+      .child(this.bind?.folder ? "No previews yet. Agents save PNGs here as <name>-vN.png — see mods/previews/agent-snippet.md." : "This space has no folder.");
 
     if (!vertical) {
       return root
@@ -897,6 +906,17 @@ export default class Previews extends View {
       return;
     }
     switch (keyName(e)) {
+      case "+":
+      case "=":
+        this.setZoom(cx, this.zoom * ZOOM_STEP);
+        break;
+      case "-":
+      case "_":
+        this.setZoom(cx, this.zoom / ZOOM_STEP);
+        break;
+      case "0":
+        this.setZoom(cx, 1);
+        break;
       case "backspace":
         this.deleteStroke(cx, this.strokesOf(item.path).length - 1);
         break;
@@ -957,9 +977,12 @@ export default class Previews extends View {
     let fw = w;
     let fh = h;
     if (dims) {
-      const s = Math.min(w / dims.w, h / dims.h, 2);
+      const s = Math.min(w / dims.w, h / dims.h) * this.zoom; // fit to the stage (small images upscale), then zoom
       fw = Math.max(1, Math.floor(dims.w * s));
       fh = Math.max(1, Math.floor(dims.h * s));
+    } else {
+      fw = Math.max(1, Math.floor(w * this.zoom));
+      fh = Math.max(1, Math.floor(h * this.zoom));
     }
     if (!rel) {
       return div().w(w).h(h).flex().items_center().justify_center().text_size(12).text_color(t.dim)
@@ -1044,6 +1067,7 @@ export default class Previews extends View {
     const titleBar = h_flex().h(40).flex_none().items_center().gap(8).px(PAD).bg(t.chrome)
       .child(div().text_size(13).font_semibold().truncate().min_w(0).child(item.name))
       .child(div().text_size(11).text_color(t.dim).flex_none().child(g.length > 1 ? `draft ${g.length - idx} of ${g.length}` : "single draft"))
+      .child(div().text_size(11).text_color(this.zoom === 1 ? t.dim : t.accent).flex_none().child(`${Math.round(this.zoom * 100)}%`))
       .child(this.statusChip(t, status))
       .child(div().flex_1())
       .when(Boolean(older), (el) => el.child(this.button(t, "w-compare", compare ? "Single" : "Compare", (cx) => {
@@ -1057,13 +1081,25 @@ export default class Previews extends View {
         closeOverlay(props().overlay);
       }));
 
-    const stage = h_flex().id("w-area").flex_1().min_w(560).min_h(420).items_center().justify_center().gap(pad).bg(t.background)
+    // Outer: the viewport (measured, scrolls both ways). Inner: at least viewport-sized, so a fitted
+    // image stays centered, and as large as its content when zoomed in, so the viewport pans over it.
+    const content = h_flex().flex_none().min_w(aw).min_h(ah).items_center().justify_center().gap(pad).p(pad)
+      .when(compare, (el) => el.child(pane(older, false, `previous · ${older.name}`)))
+      .child(pane(item, true, compare ? `current · ${item.name}` : this.tool === "pin" ? "click the image to drop a pin" : "drag on the image to draw · shift-drag for a circle"));
+    const stage = div().id("w-area").flex_1().min_w(560).min_h(420).overflow_scroll().bg(t.background)
       .on_size_change((size, cx) => {
         this.area = size;
         cx.notify();
       })
-      .when(compare, (el) => el.child(pane(older, false, `previous · ${older.name}`)))
-      .child(pane(item, true, compare ? `current · ${item.name}` : this.tool === "pin" ? "click the image to drop a pin" : "drag on the image to draw · shift-drag for a circle"));
+      // The wheel zooms; with shift held it is left to scroll (pan) the stage.
+      .on_scroll_wheel((e, cx) => {
+        if (e.modifiers?.shift) return;
+        const dy = e.delta?.y ?? (e.delta_lines?.y ?? 0) * 20;
+        if (!dy) return;
+        this.setZoom(cx, this.zoom * Math.exp(-dy * 0.001));
+        cx.stop_propagation();
+      })
+      .child(content);
 
     const armed = this.armed && this.armed.path === item.path && Date.now() - this.armed.at <= CONFIRM_MS;
     const target = this.markOf(item.path, this.editing) ? this.editing : null;

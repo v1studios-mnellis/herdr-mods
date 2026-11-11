@@ -1,0 +1,2 @@
+## Visual previews (herdr `previews` mod)
+When you produce or change a visual draft (UI screenshot, design mock, render), save the capture as a PNG into `.herdr-previews/` at the project root, named `<target>-v<N>.png` with N bumped per iteration (e.g. `homepage-v1.png`, `homepage-v2.png`; desktop and mobile as `homepage-v2.png` / `homepage-mobile-v2.png`). The herdr `previews` drawer picks them up automatically; the user annotates (pins/drawings) and sends feedback back to you as a message.

@@ -39,8 +39,8 @@ as its content up to 560 px, and scrolls. Top to bottom:
   summary; it turns `blocked`-colored with "press x again to delete <file>" while
   a delete is armed, or with the error text if listing/copying/saving failed.
 
-Empty: "No previews yet. Agents save images to .herdr-previews/ in this space's
-folder." A space without a folder says so.
+Empty: "No previews yet. Agents save PNGs here as <name>-vN.png — see
+mods/previews/agent-snippet.md." A space without a folder says so.
 
 On a top or bottom edge the cards lie in one 86 px high row (190 px per card).
 
@@ -52,11 +52,11 @@ or any part that is not a control, remembered by herdr (key `preview`). On
 `surface`, top to bottom:
 
 - A 40 px title bar on `chrome`: file name (13 px, semibold), "draft N of M" (the
-  position in its group, newest = M) or "single draft", the status chip, then on
+  position in its group, newest = M) or "single draft", the status chip, the zoom (`83%`, `accent` when not 100%), then on
   the right: `Compare` / `Single` (only when an older draft exists), `Approve`
   (`accent`), `Send notes`, `Close`.
 - Left, on `background`: the image at its real aspect ratio, as large as fits
-  (never more than 2×), centered, with a small caption above it. Each pin is a
+  (small images are scaled up to fit; zoomable, see below), centered, with a small caption above it. Each pin is a
   20 px `accent` circle with its number (11 px, `accent_foreground`), centered on
   its spot; the pin being edited has a `foreground` ring. In compare mode the
   previous (next older) draft is on the left, labeled "previous · name", and the
@@ -119,6 +119,16 @@ selected); the ✕ on a row removes that one.
 Right click on a pin still deletes the pin (pressing a pin in draw mode starts
 a stroke instead of selecting it).
 
+**Zoom, pop-out.** The image is first fitted to the stage (a small source image,
+say a 525×444 radar PNG, is upscaled to fill it), then multiplied by a zoom of
+0.25–8× (default 1). `+`/`=` zoom in ×1.25, `-`/`_` out ÷1.25, `0` resets; the
+mouse wheel over the stage zooms smoothly (`exp(-dy·0.001)`) and does not scroll.
+The title bar shows the zoom as a percent. The stage is a scroll container
+(both axes) around a content box that is at least stage-sized (so a fitted image
+stays centered) and as large as the image when zoomed in: pan with shift + wheel
+or the trackpad's own scroll. Pins and strokes are percentages of the frame, so they
+follow the zoom; the stroke SVG is re-sized for the new frame on the next poll.
+
 **Keys, pop-out.** It takes the keyboard when it opens. `[` or `,` shows the
 previous (older) draft of the group, `]` or `.` the next (newer); `enter` toggles
 compare; `a` approve, `s` send, `x` delete (two presses; then the neighbouring
@@ -172,8 +182,17 @@ show a "N ✎" count.
 the block to that size until the pointer hovers, so `alt-p` could not open it. Without
 it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
 
+## Install
+
+Also paste the content of `agent-snippet.md` into the project's `AGENTS.md`, and
+into any agent skill that produces screenshots (e.g. impeccable), so agents know
+to save PNGs as `.herdr-previews/<target>-vN.png`. The mod never writes an
+`AGENTS.md` itself; the snippet is added by hand.
+
 ## Built from
 
+- `agent-snippet.md`: the ready-to-paste AGENTS.md fragment describing the
+  `.herdr-previews/<target>-v<N>.png` convention.
 - `mod.json`: `{ "place": "right", "title": "Previews", "focusable": true }`,
   so herdr docks one floating copy on the right edge and `pane.go` can focus it.
 - `keys.json`: `{ "global": { "alt-p": "previews.focus" } }`.
@@ -191,7 +210,8 @@ it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
     `nextCommand()` loop for `"focus"` (`this.h.focus()`), `notify` with
     `action: { name: "previews.focus" }`, `playSound("done")`,
     `run("pane.go", { direction: "left" })`, `openOverlay`.
-  - Pop-out: `closeOverlay(props().overlay)`, `TextareaState.new({ rows: 4 })`
+  - Pop-out: `this.zoom`, `on_scroll_wheel` (zoom), `overflow_scroll()` on the stage,
+    `closeOverlay(props().overlay)`, `TextareaState.new({ rows: 4 })`
     with `.on("change" | "focus" | "blur")`, `on_size_change` on the image area,
     `on_mouse_down("left" | "right")` with `e.local_position` / `e.bounds` and
     `cx.stop_propagation()` on every control, pins as `.absolute().left(px).top(px)`

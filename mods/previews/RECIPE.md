@@ -220,9 +220,12 @@ it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
 
 ## Watch out
 
-- The pop-out panel must stay within the window: it has `max_h_full`, and the note
-  editor is height-capped (`set_auto_grow(2, 3)` plus an `h(64)` scrolling wrapper),
-  because a content-sized `flex_none` panel grows past the window bottom.
+- Pop-out windows are content-sized unless given pixel width/height; fractions
+  alone can shrink the frame to content and let the panel overflow it. The mod
+  passes a fixed pixel height (880) with `width: 0.72`, an `overflow_hidden()`
+  `size_full()` root, and internal scroll areas: the panel is `min_h(0).max_h_full()`,
+  the marks list is `flex_1().min_h(0)` and scrolls, the note editor sits in an
+  `h(64)` scrolling `flex_none` wrapper, and the other panel rows are `flex_none`.
 - Pop-out windows are content-sized at first layout, so `on_size_change` can report
   ~0 height initially; the stage has min size 560x420 and `windowView` falls back to
   1000x640 until measured.

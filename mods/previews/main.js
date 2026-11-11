@@ -594,7 +594,7 @@ export default class Previews extends View {
       kind: "window",
       key: "preview",
       width: 0.72,
-      height: 0.85,
+      height: 880, // fixed pixel height: fractions alone let the frame shrink to content
       props: { path: item.path, machine: this.bind?.machine ?? null, folder: this.bind?.folder ?? "", space: this.bind?.spaceId ?? null },
     });
     cx.notify();
@@ -1070,7 +1070,7 @@ export default class Previews extends View {
     const editingPin = (i) => target?.kind === "pin" && target.i === i;
     const editingStroke = (i) => target?.kind === "stroke" && target.i === i;
     const panel = v_flex().w(PANEL_W).flex_none().min_h(0).max_h_full().gap(8).p(PAD).bg(t.chrome)
-      .child(div().text_size(12).font_semibold().child(`Pins (${pins.length}) · tool: ${this.tool} [1-2]`))
+      .child(div().flex_none().text_size(12).font_semibold().child(`Pins (${pins.length}) · tool: ${this.tool} [1-2]`))
       .child(
         h_flex().gap(4).flex_none()
           .children(
@@ -1126,7 +1126,7 @@ export default class Previews extends View {
       )
       .when(target != null, (el) =>
         el
-          .child(div().text_size(11).text_color(t.dim).child(`${target.kind === "pin" ? `Note for pin ${target.i + 1}` : `Note for drawing ${target.i + 1} (${strokes[target.i].tool})`} · Esc to finish`))
+          .child(div().flex_none().text_size(11).text_color(t.dim).child(`${target.kind === "pin" ? `Note for pin ${target.i + 1}` : `Note for drawing ${target.i + 1} (${strokes[target.i].tool})`} · Esc to finish`))
           .child(
             div().id("w-note").w_full().h(64).flex_none().overflow_y_scrollbar().p(6).rounded(6).border_1().border_color(t.input).bg(t.background)
               .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
@@ -1134,10 +1134,10 @@ export default class Previews extends View {
           ),
       )
       .child(
-        div().text_size(10).text_color(armed ? t.blocked : t.dim)
+        div().flex_none().text_size(10).text_color(armed ? t.blocked : t.dim)
           .child(armed ? "press x again to delete this file" : "1 pin · 2 draw (shift = circle) · ⌫ undo stroke · [ ] older/newer · ⏎ compare · a approve · s send · x delete · Esc close"),
       )
-      .when(Boolean(this.error), (el) => el.child(div().text_size(10).text_color(t.blocked).child(this.error)));
+      .when(Boolean(this.error), (el) => el.child(div().flex_none().text_size(10).text_color(t.blocked).child(this.error)));
 
     return v_flex()
       .id("previews-window")
@@ -1145,7 +1145,7 @@ export default class Previews extends View {
       .on_key_down((e, cx) => this.windowKey(e, cx))
       // A release outside the image still ends the stroke.
       .on_mouse_up("left", (_e, cx) => this.finishStroke(cx))
-      .size_full().bg(t.surface).text_color(t.foreground).text_size(12)
+      .size_full().overflow_hidden().bg(t.surface).text_color(t.foreground).text_size(12)
       .child(titleBar)
       .child(h_flex().flex_1().min_h(0).child(stage).child(panel));
   }

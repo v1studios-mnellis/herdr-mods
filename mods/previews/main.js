@@ -6,7 +6,7 @@
 // One file, two modes: the docked copy is the drawer; `props().overlay` is set
 // in the pop-out window that openOverlay({ mod: "previews" }) makes.
 
-import { View, div, image, svg } from "gpui-kit";
+import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, ScrollHandle } from "gpui-base";
 import { agents, spaces, panes, focused, props, theme, run, exec, notify, playSound, openOverlay, closeOverlay, nextCommand, placement } from "herdr";
 import {
@@ -983,8 +983,8 @@ export default class Previews extends View {
             .child(String(i + 1)),
         ),
       )
-      // Drawn strokes, over the pins; the svg has no mouse handlers, so presses pass through.
-      .when(Boolean(overlay), (el) => el.child(div().absolute().inset_0().child(svg(overlay).size_full().text_color(t.accent))));
+      // Drawn strokes, over the pins; the overlay has no mouse handlers, so presses pass through.
+      .when(Boolean(overlay), (el) => el.child(div().absolute().inset_0().child(image(overlay).size_full())));
   }
 
   windowView(t, cx) {

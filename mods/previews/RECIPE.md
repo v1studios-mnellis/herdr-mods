@@ -152,11 +152,11 @@ file and written, so the drawer and the window don't overwrite each other.
 **Stroke overlay.** All of an image's strokes (and the one being drawn) are one SVG,
 `viewBox="0 0 100 100" preserveAspectRatio="none"`, `fill="none"`, 3 px
 `vector-effect="non-scaling-stroke"` round-cap lines, shown by
-`svg(rel).size_full()` in an `absolute().inset_0()` div over the image and the pins
+`image(rel).size_full()` in an `absolute().inset_0()` div over the image and the pins
 (it has no mouse handlers, so presses reach the pins and the frame). While drawing,
 the file is rewritten at most every 150 ms, and once more on release. Each write
 is a new file `mods/previews/.cache/strokes-<hash>-<n>.svg` (n counts up; the old
-versions are removed) because `svg()` may cache by path. Strokes loaded from
+versions are removed) because the renderer may cache by path. Strokes loaded from
 `notes.json` get their file on the next poll (`ensureStrokes`). The drawer cards
 show a "N ✎" count.
 
@@ -222,11 +222,13 @@ it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
 - Stroke SVGs must live in the hidden `.cache` dir and get a new versioned name
   per save: writing a file under `mods/` outside a dot-dir reloads the mod, so a
   non-hidden path would reload it on every save, mid-stroke; and a reused path may
-  be served from `svg()`'s cache.
+  be served from the renderer's cache.
 - Not verified without a real mouse and window: drawing itself, and whether the
-  renderer honours `vector-effect="non-scaling-stroke"` and the file's own stroke
-  colors (the `svg` is also given `text_color(accent)` as a fallback). If strokes
-  look hair-thin or huge, that is the place to look.
+  renderer honours `vector-effect="non-scaling-stroke"`. If strokes look hair-thin
+  or huge, that is the place to look.
+- `svg()` theme-tints the file with the text color, so every stroke came out one
+  pale color. Use `image()` for the colored stroke overlay: it renders the SVG in
+  full color (live-verified).
 - `image()` paths are relative to `~/.config/herdr-app`. An absolute project path
   silently draws nothing, which is why every image is cached first.
 - A local file younger than 1.5 s is not copied yet (it may still be written); the

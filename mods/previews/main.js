@@ -27,13 +27,12 @@ const THUMB_W = 64;
 const THUMB_H = 48;
 const PANEL_W = 250; // pop-out: pins and notes
 const PAD = 12;
-const SVG_THROTTLE_MS = 150; // live stroke: how often the overlay SVG is rewritten
+const SVG_THROTTLE_MS = 30; // live stroke: at most this often the overlay SVG is rewritten and the window repainted
 const TOOLS = [
   { id: "pin", name: "pin", keys: ["1", "p"] },
-  { id: "pen", name: "pen", keys: ["2", "f"] },
-  { id: "line", name: "line", keys: ["3", "l"] },
-  { id: "circle", name: "circle", keys: ["4", "c"] },
+  { id: "draw", name: "draw", keys: ["2", "d"] },
 ];
+// "line" is no longer drawable but old notes.json files hold some, so it is still listed.
 const STROKE_ICON = { pen: "✎", line: "─", circle: "○" };
 
 const message = (e) => String(e?.message ?? e);
@@ -191,7 +190,7 @@ export default class Previews extends View {
 
   async poll(cx) {
     const b = this.bind;
-    if (this.polling) return;
+    if (this.polling || this.live) return; // nothing is re-read mid-stroke
     if (!b || !b.folder) {
       this.items = [];
       cx.notify();
@@ -249,6 +248,7 @@ export default class Previews extends View {
   }
 
   async ensure(cx) {
+    if (this.live) return; // no cache or overlay work mid-stroke
     this.ensureStrokes(cx);
     if (this.caching) {
       this.recache = true;
@@ -368,16 +368,17 @@ export default class Previews extends View {
     if (!p) return;
     this.commitNote(cx);
     const color = theme().accent;
-    const stroke =
-      this.tool === "pen" ? { tool: "pen", color, pts: [p] }
-      : this.tool === "line" ? { tool: "line", color, a: p, b: p }
-      : { tool: "circle", color, c: p, rx: 0, ry: 0 };
+    // Draw mode: a plain drag is a pen stroke, shift+drag a circle centred on the press.
+    const stroke = e.modifiers?.shift ? { tool: "circle", color, c: p, rx: 0, ry: 0 } : { tool: "pen", color, pts: [p] };
     this.live = { path, stroke };
     this.svgAt = Date.now();
     this.saveStrokes(cx, path);
   }
 
-  // Moves the live stroke to the pointer; the SVG is rewritten at most every 150 ms.
+  // Moves the live stroke to the pointer. Every SVG_THROTTLE_MS the overlay SVG is
+  // rewritten (saveStrokes notifies once the new file is written: that repaint is
+  // the realtime update); a move inside the window schedules nothing, and the
+  // release always writes the final state.
   extendStroke(cx, e) {
     const s = this.live?.stroke;
     const p = s && this.pointAt(e);
@@ -386,8 +387,6 @@ export default class Previews extends View {
       const last = s.pts[s.pts.length - 1];
       if (Math.abs(p.x - last.x) < 0.2 && Math.abs(p.y - last.y) < 0.2) return;
       s.pts.push(p);
-    } else if (s.tool === "line") {
-      s.b = p;
     } else {
       s.rx = round1(Math.abs(p.x - s.c.x));
       s.ry = round1(Math.abs(p.y - s.c.y));
@@ -406,7 +405,6 @@ export default class Previews extends View {
     this.live = null;
     const keep =
       s.tool === "pen" ? s.pts.length > 1
-      : s.tool === "line" ? s.a.x !== s.b.x || s.a.y !== s.b.y
       : s.rx > 0 || s.ry > 0;
     if (keep) {
       this.update(cx, (n) => {
@@ -986,7 +984,7 @@ export default class Previews extends View {
             .cursor_pointer()
             .tooltip(p.text || `pin ${i + 1}`)
             .on_mouse_down("left", (_e, cx) => {
-              if (this.tool !== "pin") return; // draw modes: the press reaches the frame and starts a stroke
+              if (this.tool !== "pin") return; // draw mode: the press reaches the frame and starts a stroke
               cx.stop_propagation();
               this.selectPin(cx, i);
             })
@@ -1046,12 +1044,12 @@ export default class Previews extends View {
         cx.notify();
       })
       .when(compare, (el) => el.child(pane(older, false, `previous · ${older.name}`)))
-      .child(pane(item, true, compare ? `current · ${item.name}` : this.tool === "pin" ? "click the image to drop a pin" : `drag on the image to draw a ${this.tool}`));
+      .child(pane(item, true, compare ? `current · ${item.name}` : this.tool === "pin" ? "click the image to drop a pin" : "drag on the image to draw · shift-drag for a circle"));
 
     const armed = this.armed && this.armed.path === item.path && Date.now() - this.armed.at <= CONFIRM_MS;
     const editing = this.editing != null && pins[this.editing] ? this.editing : null;
     const panel = v_flex().w(PANEL_W).flex_none().min_h(0).gap(8).p(PAD).bg(t.chrome)
-      .child(div().text_size(12).font_semibold().child(`Pins (${pins.length}) · tool: ${this.tool} [1-4]`))
+      .child(div().text_size(12).font_semibold().child(`Pins (${pins.length}) · tool: ${this.tool} [1-2]`))
       .child(
         h_flex().gap(4).flex_none()
           .children(
@@ -1111,7 +1109,7 @@ export default class Previews extends View {
       )
       .child(
         div().text_size(10).text_color(armed ? t.blocked : t.dim)
-          .child(armed ? "press x again to delete this file" : "1-4 tools · ⌫ undo stroke · [ ] older/newer · ⏎ compare · a approve · s send · x delete · Esc close"),
+          .child(armed ? "press x again to delete this file" : "1 pin · 2 draw (shift = circle) · ⌫ undo stroke · [ ] older/newer · ⏎ compare · a approve · s send · x delete · Esc close"),
       )
       .when(Boolean(this.error), (el) => el.child(div().text_size(10).text_color(t.blocked).child(this.error)));
 

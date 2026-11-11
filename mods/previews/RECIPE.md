@@ -3,8 +3,7 @@
 When a coding agent draws something (a screenshot, a mockup, a rendered page) it
 saves the image into `.herdr-previews/` in the space's folder. This mod shows
 those images in a drawer on the right edge of the window. Click one and a large,
-draggable window opens: drop numbered pins on the image with the mouse (or draw on it with a pen,
-line or circle), write a note on each pin, mark the draft approved, and send the annotated feedback straight
+draggable window opens: drop numbered pins on the image with the mouse (or draw on it with a pen, or a circle with shift), write a note on each pin, mark the draft approved, and send the annotated feedback straight
 back to the space's agent with one key. A new image raises a toast and a sound.
 
 ![Previews](preview.png)
@@ -62,10 +61,10 @@ or any part that is not a control, remembered by herdr (key `preview`). On
   its spot; the pin being edited has a `foreground` ring. In compare mode the
   previous (next older) draft is on the left, labeled "previous · name", and the
   current one, with its pins, on the right, "current · name".
-- Right, a 250 px panel on `chrome`: "Pins (N) · tool: pen [1-4]" and four small
-  tool buttons (pin, pen, line, circle); one row per pin (number, note,
+- Right, a 250 px panel on `chrome`: "Pins (N) · tool: pin [1-2]" and two small
+  tool buttons ("1 pin", "2 draw"); one row per pin (number, note,
   `dim` "no note" when empty; the selected row on `selected`); under the rows,
-  the drawn strokes ("✎ pen 1", "─ line 2", "○ circle 3", each with a ✕); then, for the selected pin, "Note for pin N · Esc to finish" and a 4-row text area
+  the drawn strokes ("✎ pen 1", "○ circle 2", each with a ✕; strokes of the old `line` kind in a notes file are still listed as "─ line N"); then, for the selected pin, "Note for pin N · Esc to finish" and a 4-row text area
   (`background`, `input` border); finally a 10 px key hint line.
 
 ## How it behaves
@@ -105,14 +104,15 @@ for confirmation (press again within 3 s) and deletes the file; `escape` goes to
 the pane on the left (`pane.go`).
 
 **Drawing, pop-out.** The tool is shown in the panel header and picked with keys
-`1`/`p` pin (the default: a left click drops a pin), `2`/`f` pen, `3`/`l` line,
-`4`/`c` circle, or the panel's buttons. In a draw mode, press on the image, drag
-and release: the pen follows the pointer, the line goes from the press to the
-pointer, the circle is an ellipse centred on the press with the pointer's
-distance as its radii. A stroke is drawn in `accent` (as it was when drawn). A
+`1`/`p` pin (the default: a left click drops a pin) and `2`/`d` draw, or the
+panel's buttons. In draw mode, press on the image, drag and release: the pen
+follows the pointer; with shift held at the press it is a circle instead, an
+ellipse centred on the press with the pointer's distance as its radii. There is
+no line tool (too close to the pen); old `line` strokes still render and are
+still sent. A stroke is drawn in `accent` (as it was when drawn). A
 click without a drag draws nothing. A release outside the image also ends the
 stroke. `backspace` removes the last stroke; the ✕ on a row removes that one.
-Right click on a pin still deletes the pin (pressing a pin in a draw mode starts
+Right click on a pin still deletes the pin (pressing a pin in draw mode starts
 a stroke instead of selecting it).
 
 **Keys, pop-out.** It takes the keyboard when it opens. `[` or `,` shows the
@@ -130,7 +130,7 @@ Feedback on draft: /abs/path/homepage-v3.png
 - pin 2 at (80%, 9%): no note
 Drawn marks (percent of the image):
 - [pen] (10%, 10%) → (12%, 14%) → …
-- [line] (20%, 30%) → (60%, 30%)
+- [line] (20%, 30%) → (60%, 30%)   (only from old drafts)
 - [circle] center (50%, 50%) r (10%, 20%)
 
 Approved: /abs/path/homepage-v3.png
@@ -144,8 +144,9 @@ shows a warning toast "Nothing to send". Success is a `success` toast
 
 **Persistence.** Notes live next to the images in `.herdr-previews/notes.json`:
 `{ "<abs path>": { "status": "new|reviewed|approved", "pins": [{ "x", "y", "text" }], "strokes": [...] } }`.
-A stroke is `{ "tool": "pen|line|circle", "color": "#hex", ... }` with percent coordinates:
-pen `pts: [{x,y}]`, line `a`/`b`, circle centre `c` and radii `rx`/`ry`.
+A stroke is `{ "tool": "pen|circle|line", "color": "#hex", ... }` with percent coordinates:
+pen `pts: [{x,y}]`, circle centre `c` and radii `rx`/`ry`, line `a`/`b` (read-only: the
+UI no longer creates lines, old ones are kept, drawn and sent).
 Every edit is applied in memory at once, then re-applied to a fresh read of the
 file and written, so the drawer and the window don't overwrite each other.
 
@@ -154,7 +155,8 @@ file and written, so the drawer and the window don't overwrite each other.
 `vector-effect="non-scaling-stroke"` round-cap lines, shown by
 `image(rel).size_full()` in an `absolute().inset_0()` div over the image and the pins
 (it has no mouse handlers, so presses reach the pins and the frame). While drawing,
-the file is rewritten at most every 150 ms, and once more on release. Each write
+the file is rewritten at most every 30 ms (`SVG_THROTTLE_MS`) and the write's
+`cx.notify()` is the repaint, and once more on release. Each write
 is a new file `mods/previews/.cache/strokes-<hash>-<n>.svg` (n counts up; the old
 versions are removed) because the renderer may cache by path. Strokes loaded from
 `notes.json` get their file on the next poll (`ensureStrokes`). The drawer cards
@@ -231,11 +233,17 @@ it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
 - Pointer coordinates are the window `position` minus the frame's `bounds`
   origin, over `bounds.width/height`. `local_position` was off from the cursor in
   live use, so don't go back to it (pin drops and strokes both use `pointAt`).
-- Every redraw repaints the whole window, so drawing must not notify per mouse
-  move: `extendStroke` only updates the live stroke, the overlay SVG is rewritten
-  at most every 150 ms (the redraw comes from that write finishing), and the
-  save keeps its version in memory (no readdir per write, only the previous file
-  is unlinked). A notify throttle of ~50 ms is the ceiling if one is ever added.
+- Realtime drawing: the host does NOT hot-update an `image()`/`svg()` asset when a
+  file under the hidden `.cache` dir changes on disk (verified live: an edited
+  stroke SVG did not repaint without a mod-side `cx.notify()`). So each update is a
+  fresh versioned file plus a notify. Every notify repaints the whole window, so
+  the lever is a tight throttle: `extendStroke` updates `this.live` and, at most
+  every 30 ms (`SVG_THROTTLE_MS`, timestamp check), calls `saveStrokes`, which
+  writes the file and notifies. `svgBusy`/`svgDirty` serialize writes and make
+  the last state land; the mouse-up always writes. Nothing else runs mid-drag:
+  `poll` (no notes.json re-read) and `ensure` return early while `this.live` is
+  set. The save keeps its version in memory (no readdir per write, only the
+  previous file is unlinked).
 - Not verified without a real mouse and window: drawing itself (the pointer
   mapping and the 2 px width were checked only by reading the code).
 - `svg()` theme-tints the file with the text color, so every stroke came out one

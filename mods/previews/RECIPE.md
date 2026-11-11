@@ -178,6 +178,9 @@ file and written, so the drawer and the window don't overwrite each other.
 
 ## Watch out
 
+- Pop-out windows are content-sized at first layout, so `on_size_change` can report
+  ~0 height initially; the stage has min size 560x420 and `windowView` falls back to
+  1000x640 until measured.
 - The drawer shows a rail until hovered. Herdr sizes a floating mod to its content,
   so the mod itself renders the rail or the list from `placement().hovered`; no
   `peek` is needed in the layout. A copy focused by key stays open (`wantOpen`)

@@ -830,8 +830,10 @@ export default class Previews extends View {
     const pad = PAD;
     const cols = compare ? 2 : 1;
     const labelH = 20;
-    const availW = Math.max(40, (this.area.width - pad * 2 - (cols - 1) * pad) / cols);
-    const availH = Math.max(40, this.area.height - pad * 2 - labelH);
+    const aw = this.area.width > 80 ? this.area.width : 1000;
+    const ah = this.area.height > 80 ? this.area.height : 640;
+    const availW = Math.max(40, (aw - pad * 2 - (cols - 1) * pad) / cols);
+    const availH = Math.max(40, ah - pad * 2 - labelH);
 
     const pane = (it, annotate, label) =>
       v_flex().flex_none().items_center().gap(4)
@@ -854,7 +856,7 @@ export default class Previews extends View {
         closeOverlay(props().overlay);
       }));
 
-    const stage = h_flex().id("w-area").flex_1().min_w(0).min_h(0).items_center().justify_center().gap(pad).bg(t.background)
+    const stage = h_flex().id("w-area").flex_1().min_w(560).min_h(420).items_center().justify_center().gap(pad).bg(t.background)
       .on_size_change((size, cx) => {
         this.area = size;
         cx.notify();

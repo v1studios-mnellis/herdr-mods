@@ -3,8 +3,8 @@
 When a coding agent draws something (a screenshot, a mockup, a rendered page) it
 saves the image into `.herdr-previews/` in the space's folder. This mod shows
 those images in a drawer on the right edge of the window. Click one and a large,
-draggable window opens: drop numbered pins on the image with the mouse, write a
-note on each, mark the draft approved, and send the annotated feedback straight
+draggable window opens: drop numbered pins on the image with the mouse (or draw on it with a pen,
+line or circle), write a note on each pin, mark the draft approved, and send the annotated feedback straight
 back to the space's agent with one key. A new image raises a toast and a sound.
 
 ![Previews](preview.png)
@@ -62,9 +62,10 @@ or any part that is not a control, remembered by herdr (key `preview`). On
   its spot; the pin being edited has a `foreground` ring. In compare mode the
   previous (next older) draft is on the left, labeled "previous · name", and the
   current one, with its pins, on the right, "current · name".
-- Right, a 250 px panel on `chrome`: "Pins (N)"; one row per pin (number, note,
+- Right, a 250 px panel on `chrome`: "Pins (N) · tool: pen [1-4]" and four small
+  tool buttons (pin, pen, line, circle); one row per pin (number, note,
   `dim` "no note" when empty; the selected row on `selected`); under the rows,
-  for the selected pin, "Note for pin N · Esc to finish" and a 4-row text area
+  the drawn strokes ("✎ pen 1", "─ line 2", "○ circle 3", each with a ✕); then, for the selected pin, "Note for pin N · Esc to finish" and a 4-row text area
   (`background`, `input` border); finally a 10 px key hint line.
 
 ## How it behaves
@@ -103,6 +104,17 @@ scrolls into view); `enter` opens the pop-out; `a` approves the selected image;
 for confirmation (press again within 3 s) and deletes the file; `escape` goes to
 the pane on the left (`pane.go`).
 
+**Drawing, pop-out.** The tool is shown in the panel header and picked with keys
+`1`/`p` pin (the default: a left click drops a pin), `2`/`f` pen, `3`/`l` line,
+`4`/`c` circle, or the panel's buttons. In a draw mode, press on the image, drag
+and release: the pen follows the pointer, the line goes from the press to the
+pointer, the circle is an ellipse centred on the press with the pointer's
+distance as its radii. A stroke is drawn in `accent` (as it was when drawn). A
+click without a drag draws nothing. A release outside the image also ends the
+stroke. `backspace` removes the last stroke; the ✕ on a row removes that one.
+Right click on a pin still deletes the pin (pressing a pin in a draw mode starts
+a stroke instead of selecting it).
+
 **Keys, pop-out.** It takes the keyboard when it opens. `[` or `,` shows the
 previous (older) draft of the group, `]` or `.` the next (newer); `enter` toggles
 compare; `a` approve, `s` send, `x` delete (two presses; then the neighbouring
@@ -116,19 +128,41 @@ sends. The message pasted into the agent's terminal (with Enter, via `hc send`):
 Feedback on draft: /abs/path/homepage-v3.png
 - pin 1 at (12%, 50%): move this up
 - pin 2 at (80%, 9%): no note
+Drawn marks (percent of the image):
+- [pen] (10%, 10%) → (12%, 14%) → …
+- [line] (20%, 30%) → (60%, 30%)
+- [circle] center (50%, 50%) r (10%, 20%)
 
 Approved: /abs/path/homepage-v3.png
 ```
 
-(`Feedback…` and the pin lines only when there are pins; `Approved:` only for
+(`Feedback…` and the pin/mark lines only when there are pins or strokes; a freehand
+path is thinned to at most 12 points; `Approved:` only for
 approve; several images are separated by a blank line.) Sending without pins
 shows a warning toast "Nothing to send". Success is a `success` toast
 ("Approved homepage-v3.png", "Sent feedback on …"); failure an `error` toast.
 
 **Persistence.** Notes live next to the images in `.herdr-previews/notes.json`:
-`{ "<abs path>": { "status": "new|reviewed|approved", "pins": [{ "x", "y", "text" }] } }`.
+`{ "<abs path>": { "status": "new|reviewed|approved", "pins": [{ "x", "y", "text" }], "strokes": [...] } }`.
+A stroke is `{ "tool": "pen|line|circle", "color": "#hex", ... }` with percent coordinates:
+pen `pts: [{x,y}]`, line `a`/`b`, circle centre `c` and radii `rx`/`ry`.
 Every edit is applied in memory at once, then re-applied to a fresh read of the
 file and written, so the drawer and the window don't overwrite each other.
+
+**Stroke overlay.** All of an image's strokes (and the one being drawn) are one SVG,
+`viewBox="0 0 100 100" preserveAspectRatio="none"`, `fill="none"`, 3 px
+`vector-effect="non-scaling-stroke"` round-cap lines, shown by
+`svg(rel).size_full()` in an `absolute().inset_0()` div over the image and the pins
+(it has no mouse handlers, so presses reach the pins and the frame). While drawing,
+the file is rewritten at most every 150 ms, and once more on release. Each write
+is a new file `mods/previews/.cache/strokes-<hash>-<n>.svg` (n counts up; the old
+versions are removed) because `svg()` may cache by path. Strokes loaded from
+`notes.json` get their file on the next poll (`ensureStrokes`). The drawer cards
+show a "N ✎" count.
+
+**Layout.** The floating block in the layout has no `peek`: with one, herdr clips
+the block to that size until the pointer hovers, so `alt-p` could not open it. Without
+it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
 
 ## Built from
 
@@ -158,7 +192,7 @@ file and written, so the drawer and the window don't overwrite each other.
   "-maxdepth", "1", "-type", "f", "(", "-name", "*.png", "-o", ... ")", "-printf",
   "%T@\t%p\n"], { on: machine })`), `cachedImage`/`removeCached`/`imageSize` (see
   below), `readNotesRaw` (`readTextFile(path, { on: machine })`), `parseNotes`,
-  `writeNotesText`, `feedbackText`, `sendToAgent` (`hc(["send", address, text])`;
+  `writeNotesText`, `strokesSvg`/`writeStrokeSvg` (overlay file), `feedbackText`, `sendToAgent` (`hc(["send", address, text])`;
   `address` is the core address, `t4` or `anton/t3`).
 - Images: `image(path)` reads only below `~/.config/herdr-app`, so every shown
   image is copied to `mods/previews/.cache/<hash>-<mtime ms>.<ext>` (hidden folder,
@@ -185,6 +219,14 @@ file and written, so the drawer and the window don't overwrite each other.
   so the mod itself renders the rail or the list from `placement().hovered`; no
   `peek` is needed in the layout. A copy focused by key stays open (`wantOpen`)
   until it loses the keyboard.
+- Stroke SVGs must live in the hidden `.cache` dir and get a new versioned name
+  per save: writing a file under `mods/` outside a dot-dir reloads the mod, so a
+  non-hidden path would reload it on every save, mid-stroke; and a reused path may
+  be served from `svg()`'s cache.
+- Not verified without a real mouse and window: drawing itself, and whether the
+  renderer honours `vector-effect="non-scaling-stroke"` and the file's own stroke
+  colors (the `svg` is also given `text_color(accent)` as a fallback). If strokes
+  look hair-thin or huge, that is the place to look.
 - `image()` paths are relative to `~/.config/herdr-app`. An absolute project path
   silently draws nothing, which is why every image is cached first.
 - A local file younger than 1.5 s is not copied yet (it may still be written); the

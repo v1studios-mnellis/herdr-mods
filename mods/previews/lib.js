@@ -80,7 +80,7 @@ export async function listImages(folder, machine) {
 
 // ---- image cache --------------------------------------------------------------
 
-function hashOf(s) {
+export function hashOf(s) {
   let a = 0x811c9dc5;
   let b = 0x9747b28c;
   for (let i = 0; i < s.length; i++) {
@@ -134,6 +134,62 @@ export async function removeCached(rel) {
   try {
     await fs.unlink(`${appHome()}/${rel}`);
   } catch {}
+}
+
+// ---- stroke overlay ---------------------------------------------------------
+// Free-draw strokes are stored as percentages of the image and drawn by one SVG
+// per image (viewBox 0 0 100 100, stretched to the frame). The file lives in the
+// hidden cache dir (a write there never reloads the mod) under a versioned name,
+// strokes-<hash>-<n>.svg: svg() may cache by path, so every save is a new path
+// and the previous version is removed.
+
+const STROKE_PX = 3;
+const num = (n) => Math.round(Math.min(100, Math.max(0, Number(n) || 0)) * 100) / 100;
+const hexOf = (c) => (/^#[0-9a-f]{3,8}$/i.test(c ?? "") ? c : "#ff4d4d");
+
+export function strokesSvg(strokes) {
+  const attrs = (c) => `fill="none" stroke="${hexOf(c)}" stroke-width="${STROKE_PX}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"`;
+  const shapes = [];
+  for (const s of strokes) {
+    if (s.tool === "pen" && Array.isArray(s.pts) && s.pts.length) {
+      // A single point (a click) is a zero-length segment; round caps make it a dot.
+      const pts = s.pts.length === 1 ? [s.pts[0], s.pts[0]] : s.pts;
+      shapes.push(`<polyline points="${pts.map((p) => `${num(p.x)},${num(p.y)}`).join(" ")}" ${attrs(s.color)}/>`);
+    } else if (s.tool === "line" && s.a && s.b) {
+      shapes.push(`<line x1="${num(s.a.x)}" y1="${num(s.a.y)}" x2="${num(s.b.x)}" y2="${num(s.b.y)}" ${attrs(s.color)}/>`);
+    } else if (s.tool === "circle" && s.c) {
+      shapes.push(`<ellipse cx="${num(s.c.x)}" cy="${num(s.c.y)}" rx="${num(s.rx)}" ry="${num(s.ry)}" ${attrs(s.color)}/>`);
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">${shapes.join("")}</svg>\n`;
+}
+
+// Writes the next version of an image's stroke SVG and removes the older ones.
+// Resolves with the path relative to appHome(), or null when there is nothing to
+// draw (then every version is removed). `machine`+`path` name the image.
+export async function writeStrokeSvg(machine, path, strokes) {
+  const id = hashOf(`${machine ?? ""}:${path}`);
+  const dir = `${appHome()}/${CACHE}`;
+  const re = new RegExp(`^strokes-${id}-(\\d+)\\.svg$`);
+  let files = [];
+  try {
+    files = await fs.readdir(dir);
+  } catch {} // no cache dir yet
+  const old = files.filter((f) => re.test(f));
+  let rel = null;
+  if (strokes.length) {
+    const n = Math.max(0, ...old.map((f) => Number(re.exec(f)[1]))) + 1;
+    const file = `strokes-${id}-${n}.svg`;
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(`${dir}/${file}`, strokesSvg(strokes));
+    rel = `${CACHE}/${file}`;
+  }
+  for (const f of old) {
+    try {
+      await fs.unlink(`${dir}/${f}`);
+    } catch {}
+  }
+  return rel;
 }
 
 // Pixel size from a PNG, JPEG or WebP header, so pins can sit on the drawn
@@ -195,7 +251,7 @@ export async function imageSize(rel) {
 }
 
 // ---- notes.json -------------------------------------------------------------
-// { [absPath]: { status: "new" | "reviewed" | "approved", pins: [{ x, y, text }] } }
+// { [absPath]: { status: "new" | "reviewed" | "approved", pins: [{ x, y, text }], strokes: [...] } }
 // x and y are percentages of the image's width and height.
 
 const notesPath = (folder) => join(dirOf(folder), NOTES);
@@ -253,15 +309,22 @@ export async function writeNotesText(folder, machine, text, expectedRaw) {
 // ---- feedback ---------------------------------------------------------------
 
 const pct = (n) => `${Math.round(n)}%`;
+// At most `max` points of a freehand path, evenly spread, first and last kept.
+const thin = (pts, max) => (pts.length <= max ? pts : Array.from({ length: max }, (_, i) => pts[Math.round((i * (pts.length - 1)) / (max - 1))]));
 
-// blocks: [{ path, pins, approve }] -> the message for the agent.
+// blocks: [{ path, pins, strokes?, approve }] -> the message for the agent.
 export function feedbackText(blocks) {
   return blocks
-    .map(({ path, pins, approve }) => {
+    .map(({ path, pins, strokes = [], approve }) => {
       const lines = [];
-      if (pins.length) {
-        lines.push(`Feedback on draft: ${path}`);
-        pins.forEach((p, i) => lines.push(`- pin ${i + 1} at (${pct(p.x)}, ${pct(p.y)}): ${p.text?.trim() || "(no note)"}`));
+      if (pins.length || strokes.length) lines.push(`Feedback on draft: ${path}`);
+      pins.forEach((p, i) => lines.push(`- pin ${i + 1} at (${pct(p.x)}, ${pct(p.y)}): ${p.text?.trim() || "(no note)"}`));
+      if (strokes.length) lines.push("Drawn marks (percent of the image):");
+      for (const s of strokes) {
+        const at = (p) => `(${pct(p.x)}, ${pct(p.y)})`;
+        if (s.tool === "pen" && s.pts?.length) lines.push(`- [pen] ${thin(s.pts, 12).map(at).join(" → ")}`);
+        else if (s.tool === "line" && s.a && s.b) lines.push(`- [line] ${at(s.a)} → ${at(s.b)}`);
+        else if (s.tool === "circle" && s.c) lines.push(`- [circle] center ${at(s.c)} r (${pct(s.rx)}, ${pct(s.ry)})`);
       }
       if (approve) lines.push(`Approved: ${path}`);
       return lines.join("\n");

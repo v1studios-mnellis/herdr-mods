@@ -6,12 +6,12 @@
 // One file, two modes: the docked copy is the drawer; `props().overlay` is set
 // in the pop-out window that openOverlay({ mod: "previews" }) makes.
 
-import { View, div, image } from "gpui-kit";
+import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, ScrollHandle } from "gpui-base";
 import { agents, spaces, panes, focused, props, theme, run, exec, notify, playSound, openOverlay, closeOverlay, nextCommand, placement } from "herdr";
 import {
   baseName, stemOf, groupItems, listImages, cachedImage, removeCached, imageSize,
-  readNotesRaw, parseNotes, writeNotesText, feedbackText, sendToAgent,
+  readNotesRaw, parseNotes, writeNotesText, writeStrokeSvg, feedbackText, sendToAgent,
 } from "./lib.js";
 
 const MOD = "previews";
@@ -27,12 +27,21 @@ const THUMB_W = 64;
 const THUMB_H = 48;
 const PANEL_W = 250; // pop-out: pins and notes
 const PAD = 12;
+const SVG_THROTTLE_MS = 150; // live stroke: how often the overlay SVG is rewritten
+const TOOLS = [
+  { id: "pin", name: "pin", keys: ["1", "p"] },
+  { id: "pen", name: "pen", keys: ["2", "f"] },
+  { id: "line", name: "line", keys: ["3", "l"] },
+  { id: "circle", name: "circle", keys: ["4", "c"] },
+];
+const STROKE_ICON = { pen: "✎", line: "─", circle: "○" };
 
 const message = (e) => String(e?.message ?? e);
 const onMachine = (machine) => (machine ? { on: machine } : {});
 const entryOf = (notes, path) => {
-  const e = notes[path] ?? (notes[path] = { status: "new", pins: [] });
+  const e = notes[path] ?? (notes[path] = { status: "new", pins: [], strokes: [] });
   if (!Array.isArray(e.pins)) e.pins = [];
+  if (!Array.isArray(e.strokes)) e.strokes = [];
   return e;
 };
 // "shift-a" whether the platform reports the key as "a" or "A".
@@ -55,6 +64,12 @@ export default class Previews extends View {
     this.bkey = null;
     this.bind = null;
     this.tick = 0;
+    this.strokeSvg = new Map(); // path -> { rel }: the stroke overlay SVG under appHome
+    this.svgBusy = new Set(); // paths whose SVG is being written
+    this.svgDirty = new Set(); // ... and asked to be written again afterwards
+    this.svgAt = 0;
+    this.tool = "pin";
+    this.live = null; // { path, stroke }: the stroke being drawn
 
     if (this.overlay) {
       const p = props();
@@ -153,6 +168,8 @@ export default class Previews extends View {
     this.notes = {};
     this.notesRaw = null;
     this.rel = new Map();
+    this.strokeSvg = new Map();
+    this.live = null;
     this.queue = [];
     this.error = null;
     this.armed = null;
@@ -231,6 +248,7 @@ export default class Previews extends View {
   }
 
   async ensure(cx) {
+    this.ensureStrokes(cx);
     if (this.caching) {
       this.recache = true;
       return;
@@ -270,6 +288,129 @@ export default class Previews extends View {
 
   pinsOf(path) {
     return this.notes[path]?.pins ?? [];
+  }
+
+  strokesOf(path) {
+    return this.notes[path]?.strokes ?? [];
+  }
+
+  // ---- stroke overlay SVG ---------------------------------------------------
+
+  // The committed strokes of an image plus the one being drawn on it.
+  drawn(path) {
+    const list = [...this.strokesOf(path)];
+    if (this.live?.path === path) list.push(this.live.stroke);
+    return list;
+  }
+
+  // Loaded strokes that have no overlay file yet (after a start or a poll).
+  ensureStrokes(cx) {
+    if (!this.overlay) return;
+    for (const item of this.wanted()) {
+      if (this.strokesOf(item.path).length && !this.strokeSvg.has(item.path) && !this.svgBusy.has(item.path)) this.saveStrokes(cx, item.path);
+    }
+  }
+
+  // Writes the overlay SVG for `path` (a write asked for while one runs is
+  // done once more afterwards, so the last state always lands).
+  saveStrokes(cx, path) {
+    const b = this.bind;
+    if (!b) return;
+    if (this.svgBusy.has(path)) {
+      this.svgDirty.add(path);
+      return;
+    }
+    this.svgBusy.add(path);
+    cx.spawn(async (cx) => {
+      try {
+        do {
+          this.svgDirty.delete(path);
+          const rel = await writeStrokeSvg(b.machine, path, this.drawn(path));
+          if (rel) this.strokeSvg.set(path, { rel });
+          else this.strokeSvg.delete(path);
+          cx.notify();
+        } while (this.svgDirty.has(path));
+      } catch (e) {
+        this.error = `strokes not drawn: ${message(e)}`;
+      } finally {
+        this.svgBusy.delete(path);
+        cx.notify();
+      }
+    });
+  }
+
+  setTool(cx, tool) {
+    this.finishStroke(cx);
+    this.tool = tool;
+    cx.notify();
+  }
+
+  pointAt(e) {
+    if (!e.local_position || !e.bounds || !e.bounds.width || !e.bounds.height) return null;
+    return { x: round1((e.local_position.x / e.bounds.width) * 100), y: round1((e.local_position.y / e.bounds.height) * 100) };
+  }
+
+  startStroke(cx, path, e) {
+    const p = this.pointAt(e);
+    if (!p) return;
+    this.commitNote(cx);
+    const color = theme().accent;
+    const stroke =
+      this.tool === "pen" ? { tool: "pen", color, pts: [p] }
+      : this.tool === "line" ? { tool: "line", color, a: p, b: p }
+      : { tool: "circle", color, c: p, rx: 0, ry: 0 };
+    this.live = { path, stroke };
+    this.svgAt = Date.now();
+    this.saveStrokes(cx, path);
+  }
+
+  // Moves the live stroke to the pointer; the SVG is rewritten at most every 150 ms.
+  extendStroke(cx, e) {
+    const s = this.live?.stroke;
+    const p = s && this.pointAt(e);
+    if (!p) return;
+    if (s.tool === "pen") {
+      const last = s.pts[s.pts.length - 1];
+      if (Math.abs(p.x - last.x) < 0.2 && Math.abs(p.y - last.y) < 0.2) return;
+      s.pts.push(p);
+    } else if (s.tool === "line") {
+      s.b = p;
+    } else {
+      s.rx = round1(Math.abs(p.x - s.c.x));
+      s.ry = round1(Math.abs(p.y - s.c.y));
+    }
+    if (Date.now() - this.svgAt >= SVG_THROTTLE_MS) {
+      this.svgAt = Date.now();
+      this.saveStrokes(cx, this.live.path);
+    }
+  }
+
+  // Mouse up: the live stroke is kept (when it has some extent) and the SVG written.
+  finishStroke(cx, e) {
+    if (!this.live) return;
+    if (e) this.extendStroke(cx, e);
+    const { path, stroke: s } = this.live;
+    this.live = null;
+    const keep =
+      s.tool === "pen" ? s.pts.length > 1
+      : s.tool === "line" ? s.a.x !== s.b.x || s.a.y !== s.b.y
+      : s.rx > 0 || s.ry > 0;
+    if (keep) {
+      this.update(cx, (n) => {
+        entryOf(n, path).strokes.push(s);
+      });
+    }
+    this.saveStrokes(cx, path);
+    cx.notify();
+  }
+
+  deleteStroke(cx, i) {
+    const path = this.path;
+    if (!this.strokesOf(path)[i]) return;
+    this.update(cx, (n) => {
+      n[path]?.strokes?.splice(i, 1);
+    });
+    this.saveStrokes(cx, path);
   }
 
   // Edit the notes: at once in memory, then on disk against a fresh read (so
@@ -361,7 +502,7 @@ export default class Previews extends View {
   send(cx, blocks, done, onSent) {
     const text = feedbackText(blocks);
     if (!text) {
-      notify({ title: "Nothing to send", body: "Drop a pin on the image first.", level: "warning" });
+      notify({ title: "Nothing to send", body: "Drop a pin or draw on the image first.", level: "warning" });
       return;
     }
     const agent = this.agent();
@@ -384,13 +525,13 @@ export default class Previews extends View {
   sendNotes(cx, item) {
     if (!item) return;
     this.commitNote(cx);
-    this.send(cx, [{ path: item.path, pins: this.pinsOf(item.path), approve: false }], `Sent feedback on ${item.name}`);
+    this.send(cx, [{ path: item.path, pins: this.pinsOf(item.path), strokes: this.strokesOf(item.path), approve: false }], `Sent feedback on ${item.name}`);
   }
 
   approve(cx, list) {
     if (!list.length) return;
     this.commitNote(cx);
-    const blocks = list.map((i) => ({ path: i.path, pins: this.pinsOf(i.path), approve: true }));
+    const blocks = list.map((i) => ({ path: i.path, pins: this.pinsOf(i.path), strokes: this.strokesOf(i.path), approve: true }));
     // Marked approved only after the agent has heard it; on failure the status stays.
     this.send(cx, blocks, list.length > 1 ? `Approved ${list.length} drafts` : `Approved ${list[0].name}`, (cx) =>
       this.update(cx, (n) => {
@@ -416,6 +557,8 @@ export default class Previews extends View {
         const cached = this.rel.get(item.path)?.rel;
         if (cached) removeCached(cached);
         this.rel.delete(item.path);
+        this.strokeSvg.delete(item.path);
+        writeStrokeSvg(b.machine, item.path, []).catch(() => {});
         this.items = this.items.filter((i) => i.path !== item.path);
         this.update(cx, (n) => {
           delete n[item.path];
@@ -532,6 +675,7 @@ export default class Previews extends View {
 
   card(t, item, selected, width) {
     const pins = this.pinsOf(item.path).length;
+    const marks = this.strokesOf(item.path).length;
     return h_flex()
       .id(`card-${item.path}`)
       .h(CARD_H).items_center().gap(8).px(8)
@@ -547,7 +691,8 @@ export default class Previews extends View {
           .child(
             h_flex().items_center().gap(6)
               .child(this.statusChip(t, this.statusOf(item.path)))
-              .when(pins > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(`${pins} pin${pins === 1 ? "" : "s"}`))),
+              .when(pins > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(`${pins} pin${pins === 1 ? "" : "s"}`)))
+              .when(marks > 0, (el) => el.child(div().text_size(11).text_color(t.dim).child(`${marks} ✎`))),
           ),
       );
   }
@@ -648,6 +793,7 @@ export default class Previews extends View {
   goto(cx, item) {
     if (!item) return;
     this.commitNote(cx);
+    this.finishStroke(cx);
     this.path = item.path;
     this.editing = null;
     this.armed = null;
@@ -714,7 +860,16 @@ export default class Previews extends View {
       return;
     }
     const item = this.current();
+    const tool = TOOLS.find((t) => t.keys.includes(keyName(e)));
+    if (tool) {
+      this.setTool(cx, tool.id);
+      cx.stop_propagation();
+      return;
+    }
     switch (keyName(e)) {
+      case "backspace":
+        this.deleteStroke(cx, this.strokesOf(item.path).length - 1);
+        break;
       case "[":
       case ",":
         this.step_(cx, 1);
@@ -782,6 +937,7 @@ export default class Previews extends View {
         .child(this.rel.get(item.path)?.error ?? "Loading image…");
     }
     const pins = annotate ? this.pinsOf(item.path) : [];
+    const overlay = annotate && this.drawn(item.path).length ? this.strokeSvg.get(item.path)?.rel : null;
     return div()
       .id(`frame-${annotate ? "main" : "old"}`)
       .relative().w(fw).h(fh).flex_none().bg(t.raised)
@@ -789,9 +945,19 @@ export default class Previews extends View {
       .when(annotate, (el) =>
         el.on_mouse_down("left", (e, cx) => {
           cx.stop_propagation();
-          if (!e.local_position || !e.bounds || !e.bounds.width || !e.bounds.height) return;
-          this.addPin(cx, round1((e.local_position.x / e.bounds.width) * 100), round1((e.local_position.y / e.bounds.height) * 100));
-        }),
+          if (this.tool !== "pin") {
+            this.startStroke(cx, item.path, e);
+            return;
+          }
+          const p = this.pointAt(e);
+          if (p) this.addPin(cx, p.x, p.y);
+        })
+          .on_mouse_move((e, cx) => this.extendStroke(cx, e))
+          .on_mouse_up("left", (e, cx) => {
+            if (!this.live) return;
+            cx.stop_propagation();
+            this.finishStroke(cx, e);
+          }),
       )
       .children(
         pins.map((p, i) =>
@@ -806,6 +972,7 @@ export default class Previews extends View {
             .cursor_pointer()
             .tooltip(p.text || `pin ${i + 1}`)
             .on_mouse_down("left", (_e, cx) => {
+              if (this.tool !== "pin") return; // draw modes: the press reaches the frame and starts a stroke
               cx.stop_propagation();
               this.selectPin(cx, i);
             })
@@ -815,7 +982,9 @@ export default class Previews extends View {
             })
             .child(String(i + 1)),
         ),
-      );
+      )
+      // Drawn strokes, over the pins; the svg has no mouse handlers, so presses pass through.
+      .when(Boolean(overlay), (el) => el.child(div().absolute().inset_0().child(svg(overlay).size_full().text_color(t.accent))));
   }
 
   windowView(t, cx) {
@@ -825,6 +994,7 @@ export default class Previews extends View {
     const older = g[idx + 1] ?? null;
     const status = this.statusOf(item.path);
     const pins = this.pinsOf(item.path);
+    const strokes = this.strokesOf(item.path);
     const compare = this.compare && older;
 
     const pad = PAD;
@@ -862,15 +1032,28 @@ export default class Previews extends View {
         cx.notify();
       })
       .when(compare, (el) => el.child(pane(older, false, `previous · ${older.name}`)))
-      .child(pane(item, true, compare ? `current · ${item.name}` : "click the image to drop a pin"));
+      .child(pane(item, true, compare ? `current · ${item.name}` : this.tool === "pin" ? "click the image to drop a pin" : `drag on the image to draw a ${this.tool}`));
 
     const armed = this.armed && this.armed.path === item.path && Date.now() - this.armed.at <= CONFIRM_MS;
     const editing = this.editing != null && pins[this.editing] ? this.editing : null;
     const panel = v_flex().w(PANEL_W).flex_none().min_h(0).gap(8).p(PAD).bg(t.chrome)
-      .child(div().text_size(12).font_semibold().child(`Pins (${pins.length})`))
+      .child(div().text_size(12).font_semibold().child(`Pins (${pins.length}) · tool: ${this.tool} [1-4]`))
+      .child(
+        h_flex().gap(4).flex_none()
+          .children(
+            TOOLS.map((tl) =>
+              div().id(`tool-${tl.id}`).px(8).h(22).flex().items_center().rounded(5).cursor_pointer().text_size(11)
+                .bg(this.tool === tl.id ? t.accent : t.raised)
+                .text_color(this.tool === tl.id ? t.accent_foreground : t.foreground)
+                .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+                .on_click((_e, cx) => this.setTool(cx, tl.id))
+                .child(`${tl.keys[0]} ${tl.name}`),
+            ),
+          ),
+      )
       .child(
         v_flex().id("w-pins").flex_1().min_h(0).gap(4).overflow_y_scrollbar()
-          .when(!pins.length, (el) => el.child(div().text_size(11).text_color(t.dim).child("Click the image to add a pin. Right-click a pin to delete it.")))
+          .when(!pins.length, (el) => el.child(div().text_size(11).text_color(t.dim).child("Press 1 and click the image to add a pin. Right-click a pin to delete it.")))
           .children(
             pins.map((p, i) =>
               h_flex().id(`row-${i}`).items_center().gap(8).p(6).rounded(6).cursor_pointer()
@@ -883,6 +1066,26 @@ export default class Previews extends View {
             ),
           ),
       )
+      .when(strokes.length > 0, (el) =>
+        el.child(
+          v_flex().id("w-strokes").flex_none().max_h(120).gap(4).overflow_y_scrollbar()
+            .child(div().text_size(11).text_color(t.dim).child(`Drawn (${strokes.length}) · Backspace removes the last`))
+            .children(
+              strokes.map((sk, i) =>
+                h_flex().id(`stroke-${i}`).items_center().gap(8).px(6).h(24).flex_none().rounded(6).bg(t.surface)
+                  .child(div().w(14).flex_none().text_size(12).text_color(sk.color).child(STROKE_ICON[sk.tool] ?? "✎"))
+                  .child(div().flex_1().min_w(0).text_size(11).truncate().child(`${sk.tool} ${i + 1}`))
+                  .child(
+                    div().id(`stroke-del-${i}`).w(18).h(18).flex().items_center().justify_center().flex_none().rounded(4).cursor_pointer().text_size(11).text_color(t.dim)
+                      .hover((st) => st.bg(t.hover))
+                      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+                      .on_click((_e, cx) => this.deleteStroke(cx, i))
+                      .child("✕"),
+                  ),
+              ),
+            ),
+        ),
+      )
       .when(editing != null, (el) =>
         el
           .child(div().text_size(11).text_color(t.dim).child(`Note for pin ${editing + 1} · Esc to finish`))
@@ -894,7 +1097,7 @@ export default class Previews extends View {
       )
       .child(
         div().text_size(10).text_color(armed ? t.blocked : t.dim)
-          .child(armed ? "press x again to delete this file" : "[ ] older/newer · ⏎ compare · a approve · s send · x delete · Esc close"),
+          .child(armed ? "press x again to delete this file" : "1-4 tools · ⌫ undo stroke · [ ] older/newer · ⏎ compare · a approve · s send · x delete · Esc close"),
       )
       .when(Boolean(this.error), (el) => el.child(div().text_size(10).text_color(t.blocked).child(this.error)));
 
@@ -902,6 +1105,8 @@ export default class Previews extends View {
       .id("previews-window")
       .track_focus(this.h)
       .on_key_down((e, cx) => this.windowKey(e, cx))
+      // A release outside the image still ends the stroke.
+      .on_mouse_up("left", (_e, cx) => this.finishStroke(cx))
       .size_full().bg(t.surface).text_color(t.foreground).text_size(12)
       .child(titleBar)
       .child(h_flex().flex_1().min_h(0).child(stage).child(panel));

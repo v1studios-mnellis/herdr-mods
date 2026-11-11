@@ -3,7 +3,7 @@
 When a coding agent draws something (a screenshot, a mockup, a rendered page) it
 saves the image into `.herdr-previews/` in the space's folder. This mod shows
 those images in a drawer on the right edge of the window. Click one and a large,
-draggable window opens: drop numbered pins on the image with the mouse (or draw on it with a pen, or a circle with shift), write a note on each pin, mark the draft approved, and send the annotated feedback straight
+draggable window opens: drop numbered pins on the image with the mouse (or draw on it with a pen, or a circle with shift), write a note on each pin and on each drawing, mark the draft approved, and send the annotated feedback straight
 back to the space's agent with one key. A new image raises a toast and a sound.
 
 ![Previews](preview.png)
@@ -64,7 +64,7 @@ or any part that is not a control, remembered by herdr (key `preview`). On
 - Right, a 250 px panel on `chrome`: "Pins (N) · tool: pin [1-2]" and two small
   tool buttons ("1 pin", "2 draw"); one row per pin (number, note,
   `dim` "no note" when empty; the selected row on `selected`); under the rows,
-  the drawn strokes ("✎ pen 1", "○ circle 2", each with a ✕; strokes of the old `line` kind in a notes file are still listed as "─ line N"); then, for the selected pin, "Note for pin N · Esc to finish" and a 4-row text area
+  the drawings ("Drawings (N) · click to add a note", then "✎ pen 1 · note", "○ circle 2 · no note", the selected row on `selected`, each with a ✕; strokes of the old `line` kind in a notes file are still listed as "─ line N"); then, for the selected pin or drawing, "Note for pin N · Esc to finish" or "Note for drawing N (pen) · Esc to finish" and a 4-row text area
   (`background`, `input` border); finally a 10 px key hint line.
 
 ## How it behaves
@@ -93,7 +93,10 @@ replaced by the list; when it leaves, the rail is back.
 **Mouse, pop-out.** Left click on the image drops a pin there (stored as
 percentages of the image's width and height) and puts the cursor in its note.
 Left click on a pin, or on its row, selects it and focuses its note. Right click
-on a pin deletes it. Notes are saved when focus leaves the text area. Pressing on
+on a pin deletes it. Each drawing has its own note too, kept apart from pin notes:
+left click on a drawing's row in the Drawings list selects it and focuses its note
+(the ✕ still only deletes). One note editor serves whichever pin or drawing is
+selected. Notes are saved when focus leaves the text area. Pressing on
 the image, a pin, a button or the text area never drags the window.
 
 **Keys, drawer.** `alt-p` (`keys.json`: `previews.focus`) moves the keyboard to
@@ -111,7 +114,8 @@ ellipse centred on the press with the pointer's distance as its radii. There is
 no line tool (too close to the pen); old `line` strokes still render and are
 still sent. A stroke is drawn in `accent` (as it was when drawn). A
 click without a drag draws nothing. A release outside the image also ends the
-stroke. `backspace` removes the last stroke; the ✕ on a row removes that one.
+stroke. `backspace` removes the last stroke (closing its note editor if it was
+selected); the ✕ on a row removes that one.
 Right click on a pin still deletes the pin (pressing a pin in draw mode starts
 a stroke instead of selecting it).
 
@@ -129,14 +133,16 @@ Feedback on draft: /abs/path/homepage-v3.png
 - pin 1 at (12%, 50%): move this up
 - pin 2 at (80%, 9%): no note
 Drawn marks (percent of the image):
-- [pen] (10%, 10%) → (12%, 14%) → …
+- [pen] (10%, 10%) → (12%, 14%) → … : "make this curve smoother"
 - [line] (20%, 30%) → (60%, 30%)   (only from old drafts)
-- [circle] center (50%, 50%) r (10%, 20%)
+- [circle] center (50%, 50%) r (10%, 20%) : "crop to this"
 
 Approved: /abs/path/homepage-v3.png
 ```
 
-(`Feedback…` and the pin/mark lines only when there are pins or strokes; a freehand
+(Pin notes and drawing notes are separate sections: the pin lines, then the
+"Drawn marks" lines. A drawing line ends with ` : "note"` (JSON-quoted, so one
+line) only when that drawing has a note. `Feedback…` and the pin/mark lines only when there are pins or strokes; a freehand
 path is thinned to at most 12 points; `Approved:` only for
 approve; several images are separated by a blank line.) Sending without pins
 shows a warning toast "Nothing to send". Success is a `success` toast
@@ -144,7 +150,7 @@ shows a warning toast "Nothing to send". Success is a `success` toast
 
 **Persistence.** Notes live next to the images in `.herdr-previews/notes.json`:
 `{ "<abs path>": { "status": "new|reviewed|approved", "pins": [{ "x", "y", "text" }], "strokes": [...] } }`.
-A stroke is `{ "tool": "pen|circle|line", "color": "#hex", ... }` with percent coordinates:
+A stroke is `{ "tool": "pen|circle|line", "color": "#hex", "text": "optional note", ... }` with percent coordinates:
 pen `pts: [{x,y}]`, circle centre `c` and radii `rx`/`ry`, line `a`/`b` (read-only: the
 UI no longer creates lines, old ones are kept, drawn and sent).
 Every edit is applied in memory at once, then re-applied to a fresh read of the

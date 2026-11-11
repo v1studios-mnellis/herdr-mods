@@ -76,15 +76,15 @@ export default class Previews extends View {
       this.path = p.path;
       this.fixed = { folder: p.folder ?? "", machine: p.machine ?? null, space: p.space ?? null };
       this.compare = false;
-      this.editing = null; // pin index in the note editor
+      this.editing = null; // { kind: "pin" | "stroke", i }: the mark in the note editor
       this.noteFocus = false;
       this.noteDirty = false;
       this.area = { width: 0, height: 0 };
       this.note = TextareaState.new({ rows: 4, placeholder: "What should change here?" });
       this.note.on("change", (_e, cx) => {
-        const pin = this.notes[this.path]?.pins?.[this.editing];
-        if (!pin) return;
-        pin.text = this.note.value();
+        const mark = this.markOf(this.path, this.editing);
+        if (!mark) return;
+        mark.text = this.note.value();
         this.noteDirty = true;
         cx.notify();
       });
@@ -418,6 +418,7 @@ export default class Previews extends View {
   deleteStroke(cx, i) {
     const path = this.path;
     if (!this.strokesOf(path)[i]) return;
+    this.dropEditing("stroke", i);
     this.update(cx, (n) => {
       n[path]?.strokes?.splice(i, 1);
     });
@@ -823,20 +824,39 @@ export default class Previews extends View {
   commitNote(cx) {
     if (!this.overlay || this.editing == null || !this.noteDirty) return;
     const text = this.note.value();
-    const i = this.editing;
+    const i = this.editing.i;
     const path = this.path;
     this.noteDirty = false;
+    const key = this.editing.kind === "stroke" ? "strokes" : "pins";
     this.update(cx, (n) => {
-      const pin = n[path]?.pins?.[i];
-      if (pin) pin.text = text;
+      const mark = n[path]?.[key]?.[i];
+      if (mark) mark.text = text;
     });
   }
 
-  selectPin(cx, i) {
-    if (this.editing !== i) this.commitNote(cx);
-    this.editing = i;
+  // The pin or stroke a note editor target `{ kind, i }` points at.
+  markOf(path, target) {
+    if (!target) return null;
+    return (target.kind === "stroke" ? this.strokesOf(path) : this.pinsOf(path))[target.i] ?? null;
+  }
+
+  isEditing(kind, i) {
+    return this.editing?.kind === kind && this.editing.i === i;
+  }
+
+  // A mark was deleted: close or re-index the editor target.
+  dropEditing(kind, i) {
+    if (this.editing?.kind !== kind) return;
+    if (this.editing.i === i) this.editing = null;
+    else if (this.editing.i > i) this.editing = { kind, i: this.editing.i - 1 };
     this.noteDirty = false;
-    this.note.set_value(this.pinsOf(this.path)[i]?.text ?? "");
+  }
+
+  selectMark(cx, kind, i) {
+    if (!this.isEditing(kind, i)) this.commitNote(cx);
+    this.editing = { kind, i };
+    this.noteDirty = false;
+    this.note.set_value(this.markOf(this.path, this.editing)?.text ?? "");
     this.note.focus();
     cx.notify();
   }
@@ -848,14 +868,12 @@ export default class Previews extends View {
     this.update(cx, (n) => {
       entryOf(n, path).pins.push({ x, y, text: "" });
     });
-    this.selectPin(cx, index);
+    this.selectMark(cx, "pin", index);
   }
 
   deletePin(cx, i) {
     const path = this.path;
-    if (this.editing === i) this.editing = null;
-    else if (this.editing != null && this.editing > i) this.editing--;
-    this.noteDirty = false;
+    this.dropEditing("pin", i);
     this.update(cx, (n) => {
       n[path]?.pins?.splice(i, 1);
     });
@@ -980,13 +998,13 @@ export default class Previews extends View {
             .top((p.y / 100) * fh - 10)
             .size(20).items_center().justify_center().rounded(10)
             .bg(t.accent).text_color(t.accent_foreground).text_size(11).font_semibold()
-            .border_1().border_color(this.editing === i ? t.foreground : t.accent)
+            .border_1().border_color(this.isEditing("pin", i) ? t.foreground : t.accent)
             .cursor_pointer()
             .tooltip(p.text || `pin ${i + 1}`)
             .on_mouse_down("left", (_e, cx) => {
               if (this.tool !== "pin") return; // draw mode: the press reaches the frame and starts a stroke
               cx.stop_propagation();
-              this.selectPin(cx, i);
+              this.selectMark(cx, "pin", i);
             })
             .on_mouse_down("right", (_e, cx) => {
               cx.stop_propagation();
@@ -1047,7 +1065,9 @@ export default class Previews extends View {
       .child(pane(item, true, compare ? `current · ${item.name}` : this.tool === "pin" ? "click the image to drop a pin" : "drag on the image to draw · shift-drag for a circle"));
 
     const armed = this.armed && this.armed.path === item.path && Date.now() - this.armed.at <= CONFIRM_MS;
-    const editing = this.editing != null && pins[this.editing] ? this.editing : null;
+    const target = this.markOf(item.path, this.editing) ? this.editing : null;
+    const editingPin = (i) => target?.kind === "pin" && target.i === i;
+    const editingStroke = (i) => target?.kind === "stroke" && target.i === i;
     const panel = v_flex().w(PANEL_W).flex_none().min_h(0).gap(8).p(PAD).bg(t.chrome)
       .child(div().text_size(12).font_semibold().child(`Pins (${pins.length}) · tool: ${this.tool} [1-2]`))
       .child(
@@ -1069,10 +1089,10 @@ export default class Previews extends View {
           .children(
             pins.map((p, i) =>
               h_flex().id(`row-${i}`).items_center().gap(8).p(6).rounded(6).cursor_pointer()
-                .bg(editing === i ? t.selected : t.surface)
-                .hover((s) => s.bg(editing === i ? t.selected : t.hover))
+                .bg(editingPin(i) ? t.selected : t.surface)
+                .hover((s) => s.bg(editingPin(i) ? t.selected : t.hover))
                 .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-                .on_click((_e, cx) => this.selectPin(cx, i))
+                .on_click((_e, cx) => this.selectMark(cx, "pin", i))
                 .child(h_flex().size(18).flex_none().items_center().justify_center().rounded(9).bg(t.accent).text_color(t.accent_foreground).text_size(10).font_semibold().child(String(i + 1)))
                 .child(div().flex_1().min_w(0).text_size(11).text_color(p.text ? t.foreground : t.dim).truncate().child(p.text || "no note")),
             ),
@@ -1080,13 +1100,18 @@ export default class Previews extends View {
       )
       .when(strokes.length > 0, (el) =>
         el.child(
-          v_flex().id("w-strokes").flex_none().max_h(120).gap(4).overflow_y_scrollbar()
-            .child(div().text_size(11).text_color(t.dim).child(`Drawn (${strokes.length}) · Backspace removes the last`))
+          v_flex().id("w-strokes").flex_none().max_h(140).gap(4).overflow_y_scrollbar()
+            .child(div().text_size(11).text_color(t.dim).child(`Drawings (${strokes.length}) · click to add a note · Backspace removes the last`))
             .children(
               strokes.map((sk, i) =>
-                h_flex().id(`stroke-${i}`).items_center().gap(8).px(6).h(24).flex_none().rounded(6).bg(t.surface)
+                h_flex().id(`stroke-${i}`).items_center().gap(8).px(6).h(24).flex_none().rounded(6).cursor_pointer()
+                  .bg(editingStroke(i) ? t.selected : t.surface)
+                  .hover((s) => s.bg(editingStroke(i) ? t.selected : t.hover))
+                  .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+                  .on_click((_e, cx) => this.selectMark(cx, "stroke", i))
                   .child(div().w(14).flex_none().text_size(12).text_color(sk.color).child(STROKE_ICON[sk.tool] ?? "✎"))
-                  .child(div().flex_1().min_w(0).text_size(11).truncate().child(`${sk.tool} ${i + 1}`))
+                  .child(div().flex_none().text_size(11).child(`${sk.tool} ${i + 1}`))
+                  .child(div().flex_1().min_w(0).text_size(11).text_color(sk.text ? t.foreground : t.dim).truncate().child(sk.text || "no note"))
                   .child(
                     div().id(`stroke-del-${i}`).w(18).h(18).flex().items_center().justify_center().flex_none().rounded(4).cursor_pointer().text_size(11).text_color(t.dim)
                       .hover((st) => st.bg(t.hover))
@@ -1098,9 +1123,9 @@ export default class Previews extends View {
             ),
         ),
       )
-      .when(editing != null, (el) =>
+      .when(target != null, (el) =>
         el
-          .child(div().text_size(11).text_color(t.dim).child(`Note for pin ${editing + 1} · Esc to finish`))
+          .child(div().text_size(11).text_color(t.dim).child(`${target.kind === "pin" ? `Note for pin ${target.i + 1}` : `Note for drawing ${target.i + 1} (${strokes[target.i].tool})`} · Esc to finish`))
           .child(
             div().w_full().flex_none().p(6).rounded(6).border_1().border_color(t.input).bg(t.background)
               .on_mouse_down("left", (_e, cx) => cx.stop_propagation())

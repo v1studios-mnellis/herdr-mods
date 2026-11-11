@@ -275,7 +275,7 @@ export async function imageSize(rel) {
 }
 
 // ---- notes.json -------------------------------------------------------------
-// { [absPath]: { status: "new" | "reviewed" | "approved", pins: [{ x, y, text }], strokes: [...] } }
+// { [absPath]: { status: "new" | "reviewed" | "approved", pins: [{ x, y, text }], strokes: [{ tool, color, ..., text? }] } }
 // x and y are percentages of the image's width and height.
 
 const notesPath = (folder) => join(dirOf(folder), NOTES);
@@ -346,9 +346,13 @@ export function feedbackText(blocks) {
       if (strokes.length) lines.push("Drawn marks (percent of the image):");
       for (const s of strokes) {
         const at = (p) => `(${pct(p.x)}, ${pct(p.y)})`;
-        if (s.tool === "pen" && s.pts?.length) lines.push(`- [pen] ${thin(s.pts, 12).map(at).join(" → ")}`);
-        else if (s.tool === "line" && s.a && s.b) lines.push(`- [line] ${at(s.a)} → ${at(s.b)}`);
-        else if (s.tool === "circle" && s.c) lines.push(`- [circle] center ${at(s.c)} r (${pct(s.rx)}, ${pct(s.ry)})`);
+        let line = null;
+        if (s.tool === "pen" && s.pts?.length) line = `- [pen] ${thin(s.pts, 12).map(at).join(" → ")}`;
+        else if (s.tool === "line" && s.a && s.b) line = `- [line] ${at(s.a)} → ${at(s.b)}`;
+        else if (s.tool === "circle" && s.c) line = `- [circle] center ${at(s.c)} r (${pct(s.rx)}, ${pct(s.ry)})`;
+        if (!line) continue;
+        const note = typeof s.text === "string" ? s.text.trim() : "";
+        lines.push(note ? `${line} : ${JSON.stringify(note)}` : line);
       }
       if (approve) lines.push(`Approved: ${path}`);
       return lines.join("\n");

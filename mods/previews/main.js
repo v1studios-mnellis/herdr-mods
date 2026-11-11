@@ -1,4 +1,4 @@
-// Previews: images an agent saves into <space folder>/.herdr-previews/ show up
+// Previews: images an agent saves into <project folder>/.herdr-previews/ show up
 // in a floating right-edge drawer. A card opens a draggable pop-out window with
 // the big image, mouse pins with notes, a status per image and a one-key send
 // of the annotated feedback to the space's agent (`hc send`).
@@ -8,7 +8,7 @@
 
 import { View, div, image } from "gpui-kit";
 import { v_flex, h_flex, TextareaState, Textarea, ScrollHandle } from "gpui-base";
-import { agents, spaces, props, theme, run, exec, notify, playSound, openOverlay, closeOverlay, nextCommand, placement } from "herdr";
+import { agents, spaces, panes, focused, props, theme, run, exec, notify, playSound, openOverlay, closeOverlay, nextCommand, placement } from "herdr";
 import {
   baseName, stemOf, groupItems, listImages, cachedImage, removeCached, imageSize,
   readNotesRaw, parseNotes, writeNotesText, feedbackText, sendToAgent,
@@ -124,7 +124,23 @@ export default class Previews extends View {
     }
     s = all.find((x) => x.active);
     if (!s) return null;
-    return { key: `${s.machine ?? ""}|${s.folder}`, folder: s.folder, machine: s.machine ?? null, spaceId: s.id, spaceName: s.name };
+    const folder = this.projectRoot(s);
+    return { key: `${s.machine ?? ""}|${folder}`, folder, machine: s.machine ?? null, spaceId: s.id, spaceName: s.name };
+  }
+
+  // The project is where the focused terminal is, not where the space's
+  // terminals started: focused cwd, else the active tab's focused (or first)
+  // pane, else the space's folder.
+  projectRoot(s) {
+    const cwd = focused()?.cwd;
+    if (cwd) return cwd;
+    const tab = s.tabs.find((t) => t.active);
+    if (tab) {
+      const ps = panes().filter((p) => p.tab === tab.id && p.cwd);
+      const p = ps.find((x) => x.focused) ?? ps[0];
+      if (p) return p.cwd;
+    }
+    return s.folder;
   }
 
   rebind() {

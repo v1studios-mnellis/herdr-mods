@@ -70,8 +70,13 @@ or any part that is not a control, remembered by herdr (key `preview`). On
 ## How it behaves
 
 **Which space.** The drawer follows the active space: it watches
-`<space folder>/.herdr-previews/` on that space's machine (local or remote),
-re-reading every 3 s. Switching spaces switches the list. The pop-out stays on the
+`<project>/.herdr-previews/` on that space's machine (local or remote),
+re-reading every 3 s. The project is the focused terminal's live folder
+(`focused().cwd`), because a space's `folder` is only where its terminals start
+(often home). When nothing with a folder is focused (a mod, such as the drawer
+itself), it falls back to the active tab's focused pane's folder (else its first
+pane's), and last to the space's `folder`. The pop-out gets the resolved project
+folder in its props. Switching spaces or `cd`-ing elsewhere switches the list. The pop-out stays on the
 space it was opened from. Feedback goes to the focused agent of that space, or
 the first agent there; with none, a warning toast says so.
 
@@ -139,7 +144,7 @@ file and written, so the drawer and the window don't overwrite each other.
     the root; `cx.timer.every(1000, ...)` polls on every third tick (and at once
     when the binding changes); `theme()` colors only.
   - Drawer: `placement()` (rail unless `hovered`/`dragging`/focused; `vertical`
-    chooses column or row), `spaces()` (active space: `folder`, `machine`),
+    chooses column or row), `spaces()` (active space: `machine`, active tab, fallback `folder`), `focused()` (`cwd`), `panes()` (active tab's `cwd`),
     `agents()` (focused in that space, else first), `ScrollHandle.scroll_to_item`,
     `nextCommand()` loop for `"focus"` (`this.h.focus()`), `notify` with
     `action: { name: "previews.focus" }`, `playSound("done")`,

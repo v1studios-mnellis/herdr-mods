@@ -81,6 +81,7 @@ export default class Previews extends View {
       this.noteDirty = false;
       this.area = { width: 0, height: 0 };
       this.note = TextareaState.new({ rows: 4, placeholder: "What should change here?" });
+      this.note.set_auto_grow(2, 3); // capped: a long note scrolls instead of growing the panel
       this.note.on("change", (_e, cx) => {
         const mark = this.markOf(this.path, this.editing);
         if (!mark) return;
@@ -1068,7 +1069,7 @@ export default class Previews extends View {
     const target = this.markOf(item.path, this.editing) ? this.editing : null;
     const editingPin = (i) => target?.kind === "pin" && target.i === i;
     const editingStroke = (i) => target?.kind === "stroke" && target.i === i;
-    const panel = v_flex().w(PANEL_W).flex_none().min_h(0).gap(8).p(PAD).bg(t.chrome)
+    const panel = v_flex().w(PANEL_W).flex_none().min_h(0).max_h_full().gap(8).p(PAD).bg(t.chrome)
       .child(div().text_size(12).font_semibold().child(`Pins (${pins.length}) · tool: ${this.tool} [1-2]`))
       .child(
         h_flex().gap(4).flex_none()
@@ -1127,7 +1128,7 @@ export default class Previews extends View {
         el
           .child(div().text_size(11).text_color(t.dim).child(`${target.kind === "pin" ? `Note for pin ${target.i + 1}` : `Note for drawing ${target.i + 1} (${strokes[target.i].tool})`} · Esc to finish`))
           .child(
-            div().w_full().flex_none().p(6).rounded(6).border_1().border_color(t.input).bg(t.background)
+            div().id("w-note").w_full().h(64).flex_none().overflow_y_scrollbar().p(6).rounded(6).border_1().border_color(t.input).bg(t.background)
               .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
               .child(Textarea.new(this.note).w_full().text_size(12).text_color(t.foreground)),
           ),

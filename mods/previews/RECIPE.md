@@ -220,6 +220,9 @@ it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
 
 ## Watch out
 
+- The pop-out panel must stay within the window: it has `max_h_full`, and the note
+  editor is height-capped (`set_auto_grow(2, 3)` plus an `h(64)` scrolling wrapper),
+  because a content-sized `flex_none` panel grows past the window bottom.
 - Pop-out windows are content-sized at first layout, so `on_size_change` can report
   ~0 height initially; the stage has min size 560x420 and `windowView` falls back to
   1000x640 until measured.

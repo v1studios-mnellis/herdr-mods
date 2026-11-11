@@ -68,6 +68,7 @@ export default class Previews extends View {
     this.svgBusy = new Set(); // paths whose SVG is being written
     this.svgDirty = new Set(); // ... and asked to be written again afterwards
     this.svgAt = 0;
+    this.framePx = null; // { w, h }: the annotated frame's rendered size in px
     this.tool = "pin";
     this.live = null; // { path, stroke }: the stroke being drawn
 
@@ -307,8 +308,17 @@ export default class Previews extends View {
   ensureStrokes(cx) {
     if (!this.overlay) return;
     for (const item of this.wanted()) {
-      if (this.strokesOf(item.path).length && !this.strokeSvg.has(item.path) && !this.svgBusy.has(item.path)) this.saveStrokes(cx, item.path);
+      if (this.strokesOf(item.path).length && !this.svgBusy.has(item.path) && this.strokeStale(item.path)) this.saveStrokes(cx, item.path);
     }
+  }
+
+  // No overlay file yet, or it was drawn for a frame size >10% off the current one.
+  strokeStale(path) {
+    const have = this.strokeSvg.get(path);
+    if (!have) return true;
+    const now = this.framePx;
+    if (!now || !have.px) return false;
+    return Math.abs(now.w - have.px.w) > have.px.w * 0.1 || Math.abs(now.h - have.px.h) > have.px.h * 0.1;
   }
 
   // Writes the overlay SVG for `path` (a write asked for while one runs is
@@ -325,8 +335,9 @@ export default class Previews extends View {
       try {
         do {
           this.svgDirty.delete(path);
-          const rel = await writeStrokeSvg(b.machine, path, this.drawn(path));
-          if (rel) this.strokeSvg.set(path, { rel });
+          const px = this.framePx;
+          const rel = await writeStrokeSvg(b.machine, path, this.drawn(path), px);
+          if (rel) this.strokeSvg.set(path, { rel, px });
           else this.strokeSvg.delete(path);
           cx.notify();
         } while (this.svgDirty.has(path));
@@ -346,8 +357,10 @@ export default class Previews extends View {
   }
 
   pointAt(e) {
-    if (!e.local_position || !e.bounds || !e.bounds.width || !e.bounds.height) return null;
-    return { x: round1((e.local_position.x / e.bounds.width) * 100), y: round1((e.local_position.y / e.bounds.height) * 100) };
+    // Window position minus the frame's origin: local_position was seen off from the cursor.
+    if (!e.position || !e.bounds || !e.bounds.width || !e.bounds.height) return null;
+    const { x: bx = 0, y: by = 0, width, height } = e.bounds;
+    return { x: round1(((e.position.x - bx) / width) * 100), y: round1(((e.position.y - by) / height) * 100) };
   }
 
   startStroke(cx, path, e) {
@@ -936,6 +949,7 @@ export default class Previews extends View {
         .px(12)
         .child(this.rel.get(item.path)?.error ?? "Loading image…");
     }
+    if (annotate) this.framePx = { w: fw, h: fh }; // the stroke SVG is sized from this
     const pins = annotate ? this.pinsOf(item.path) : [];
     const overlay = annotate && this.drawn(item.path).length ? this.strokeSvg.get(item.path)?.rel : null;
     return div()

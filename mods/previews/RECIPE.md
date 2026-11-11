@@ -223,9 +223,21 @@ it the mod's own rail/list switch (`wantOpen` while focused) sizes it.
   per save: writing a file under `mods/` outside a dot-dir reloads the mod, so a
   non-hidden path would reload it on every save, mid-stroke; and a reused path may
   be served from the renderer's cache.
-- Not verified without a real mouse and window: drawing itself, and whether the
-  renderer honours `vector-effect="non-scaling-stroke"`. If strokes look hair-thin
-  or huge, that is the place to look.
+- Stroke width is computed from the rendered frame pixels, not left to the
+  renderer: `frame()` records `this.framePx`, and `strokesSvg` uses a viewBox of
+  that pixel size (percent coordinates scaled into it) with `stroke-width` 2, so a
+  line is 2 px on screen on both axes. `vector-effect="non-scaling-stroke"` is not
+  relied on. The SVG is rewritten when the frame size drifts more than 10%.
+- Pointer coordinates are the window `position` minus the frame's `bounds`
+  origin, over `bounds.width/height`. `local_position` was off from the cursor in
+  live use, so don't go back to it (pin drops and strokes both use `pointAt`).
+- Every redraw repaints the whole window, so drawing must not notify per mouse
+  move: `extendStroke` only updates the live stroke, the overlay SVG is rewritten
+  at most every 150 ms (the redraw comes from that write finishing), and the
+  save keeps its version in memory (no readdir per write, only the previous file
+  is unlinked). A notify throttle of ~50 ms is the ceiling if one is ever added.
+- Not verified without a real mouse and window: drawing itself (the pointer
+  mapping and the 2 px width were checked only by reading the code).
 - `svg()` theme-tints the file with the text color, so every stroke came out one
   pale color. Use `image()` for the colored stroke overlay: it renders the SVG in
   full color (live-verified).

@@ -143,50 +143,74 @@ export async function removeCached(rel) {
 // strokes-<hash>-<n>.svg: svg() may cache by path, so every save is a new path
 // and the previous version is removed.
 
-const STROKE_PX = 3;
+export const STROKE_PX = 2; // drawn line width on screen, whatever the frame size
+export const FRAME_PX = { w: 800, h: 600 }; // assumed until the frame has been rendered
 const num = (n) => Math.round(Math.min(100, Math.max(0, Number(n) || 0)) * 100) / 100;
+const px = (n) => Math.round(n * 100) / 100;
 const hexOf = (c) => (/^#[0-9a-f]{3,8}$/i.test(c ?? "") ? c : "#ff4d4d");
 
-export function strokesSvg(strokes) {
+// The SVG's viewBox is the frame's pixel size (stretched to the frame, so 1 unit
+// is 1 px on both axes) and the percent coordinates are scaled into it. That way
+// STROKE_PX is the same on screen for every frame size and on both axes, with no
+// reliance on vector-effect (which the renderer may ignore).
+export function strokesSvg(strokes, framePx) {
+  const w = Math.max(1, framePx?.w || FRAME_PX.w);
+  const h = Math.max(1, framePx?.h || FRAME_PX.h);
+  const X = (n) => px((num(n) / 100) * w);
+  const Y = (n) => px((num(n) / 100) * h);
   const attrs = (c) => `fill="none" stroke="${hexOf(c)}" stroke-width="${STROKE_PX}" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"`;
   const shapes = [];
   for (const s of strokes) {
     if (s.tool === "pen" && Array.isArray(s.pts) && s.pts.length) {
       // A single point (a click) is a zero-length segment; round caps make it a dot.
       const pts = s.pts.length === 1 ? [s.pts[0], s.pts[0]] : s.pts;
-      shapes.push(`<polyline points="${pts.map((p) => `${num(p.x)},${num(p.y)}`).join(" ")}" ${attrs(s.color)}/>`);
+      shapes.push(`<polyline points="${pts.map((p) => `${X(p.x)},${Y(p.y)}`).join(" ")}" ${attrs(s.color)}/>`);
     } else if (s.tool === "line" && s.a && s.b) {
-      shapes.push(`<line x1="${num(s.a.x)}" y1="${num(s.a.y)}" x2="${num(s.b.x)}" y2="${num(s.b.y)}" ${attrs(s.color)}/>`);
+      shapes.push(`<line x1="${X(s.a.x)}" y1="${Y(s.a.y)}" x2="${X(s.b.x)}" y2="${Y(s.b.y)}" ${attrs(s.color)}/>`);
     } else if (s.tool === "circle" && s.c) {
-      shapes.push(`<ellipse cx="${num(s.c.x)}" cy="${num(s.c.y)}" rx="${num(s.rx)}" ry="${num(s.ry)}" ${attrs(s.color)}/>`);
+      shapes.push(`<ellipse cx="${X(s.c.x)}" cy="${Y(s.c.y)}" rx="${px((num(s.rx) / 100) * w)}" ry="${px((num(s.ry) / 100) * h)}" ${attrs(s.color)}/>`);
     }
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" preserveAspectRatio="none">${shapes.join("")}</svg>\n`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${shapes.join("")}</svg>\n`;
 }
 
-// Writes the next version of an image's stroke SVG and removes the older ones.
+// image id -> { n, rel }: the version last written, so a save needs no readdir.
+const strokeFiles = new Map();
+
+// Writes the next version of an image's stroke SVG and removes the previous one.
 // Resolves with the path relative to appHome(), or null when there is nothing to
-// draw (then every version is removed). `machine`+`path` name the image.
-export async function writeStrokeSvg(machine, path, strokes) {
+// draw (then the file is removed). `machine`+`path` name the image.
+export async function writeStrokeSvg(machine, path, strokes, framePx) {
   const id = hashOf(`${machine ?? ""}:${path}`);
   const dir = `${appHome()}/${CACHE}`;
-  const re = new RegExp(`^strokes-${id}-(\\d+)\\.svg$`);
-  let files = [];
-  try {
-    files = await fs.readdir(dir);
-  } catch {} // no cache dir yet
-  const old = files.filter((f) => re.test(f));
+  let prev = strokeFiles.get(id);
+  let stale = [];
+  if (!prev) {
+    // First save of this image in this run: clear versions an earlier run left behind.
+    const re = new RegExp(`^strokes-${id}-(\\d+)\\.svg$`);
+    let files = [];
+    try {
+      files = await fs.readdir(dir);
+    } catch {} // no cache dir yet
+    stale = files.filter((f) => re.test(f));
+    prev = { n: Math.max(0, ...stale.map((f) => Number(re.exec(f)[1]))), rel: null };
+  }
   let rel = null;
   if (strokes.length) {
-    const n = Math.max(0, ...old.map((f) => Number(re.exec(f)[1]))) + 1;
+    const n = prev.n + 1;
     const file = `strokes-${id}-${n}.svg`;
     await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(`${dir}/${file}`, strokesSvg(strokes));
+    await fs.writeFile(`${dir}/${file}`, strokesSvg(strokes, framePx));
     rel = `${CACHE}/${file}`;
+    strokeFiles.set(id, { n, rel });
+  } else {
+    strokeFiles.set(id, { n: prev.n, rel: null });
   }
-  for (const f of old) {
+  const drop = [...stale.map((f) => `${CACHE}/${f}`), ...(prev.rel ? [prev.rel] : [])];
+  for (const r of drop) {
+    if (r === rel) continue;
     try {
-      await fs.unlink(`${dir}/${f}`);
+      await fs.unlink(`${appHome()}/${r}`);
     } catch {}
   }
   return rel;

@@ -38,10 +38,12 @@ For a single mod that means its own repo laid out like this:
 ```
 
 then `gh api -X PUT repos/<owner>/<name>/topics --raw-field 'names[]=herdr-mod'`.
-`hermes-kanban` is already published this way as its own repo
-(github.com/v1studios-mnellis/hermes-kanban). This working repo carries topic
-`herdr-mod` too, so it is browsable at herdr.dev as well; promote a mod by
-splitting its folder into a dedicated repo when it is store-ready.
+`hermes-kanban` and `previews` are published this way as their own repos
+(github.com/v1studios-mnellis/hermes-kanban, github.com/v1studios-mnellis/previews).
+**Listings are per mod:** this working repo deliberately carries no `herdr-mod`
+topic, so herdr.dev shows one entry per published mod instead of the whole
+working repo. Promote a mod by splitting its folder into a dedicated repo when
+it is store-ready.
 
 ## Mods
 

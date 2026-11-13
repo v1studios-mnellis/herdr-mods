@@ -48,4 +48,4 @@ splitting its folder into a dedicated repo when it is store-ready.
 | Mod | What it is | Store |
 |---|---|---|
 | `hermes-kanban` | Native pane for the Hermes kanban board on a paired machine (`hermes kanban` CLI); full CRUD, 10 s poll | herdr.dev/mods/v1studios-mnellis/hermes-kanban |
-| `previews` | Floating right-edge drawer of agent preview screenshots (`.herdr-previews/`) with pop-out viewer, pin annotations, approve/send feedback to the agent | not published |
+| `previews` | Floating right-edge drawer of agent preview screenshots (`.herdr-previews/`) with pop-out viewer, pin/draw annotations, approve/send feedback to the agent | herdr.dev/mods/v1studios-mnellis/previews |

@@ -133,7 +133,7 @@ One mod, `mods/hermes-kanban/`:
   true}`: no docked copy by default; a layout, `pane.split` or `mod.open` puts
   it somewhere.
 - `keys.json` — a `global` binding `ctrl-alt-b` →
-  `{"command": "pane.split", "args": {"direction": "right", "mod":
+  `{"command": "pane.split", "args": {"direction": "down", "mod":
   "hermes-kanban"}}`, and a `mod:hermes-kanban` section with `r`, `n`, `d`, `a`.
 
 The `herdr` functions used: `exec`, `hc`, `props`, `shared`, `setShared`,
@@ -204,7 +204,7 @@ state it reads or writes: `hermes-kanban.machine`, `hermes-kanban.board`,
 
 - `herdr-app check ~/.config/herdr-app/mods/hermes-kanban` exits 0, and
   `herdr-app status` lists no errors after the pane has been open a minute.
-- `herdr-app do pane.split --direction right --mod hermes-kanban` shows the
+- `herdr-app do pane.split --direction down --mod hermes-kanban` shows the
   nine columns, and each column's count equals that status's count in
   `ssh anton-djed 'hermes kanban list --json --archived'` (669 cards, 567
   `done`, 102 `archived` on the default board when this was written). The

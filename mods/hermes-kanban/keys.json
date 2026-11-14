@@ -2,7 +2,7 @@
   "global": {
     "ctrl-alt-b": {
       "command": "pane.split",
-      "args": { "direction": "right", "mod": "hermes-kanban" }
+      "args": { "direction": "down", "mod": "hermes-kanban" }
     }
   },
   "mod:hermes-kanban": {
